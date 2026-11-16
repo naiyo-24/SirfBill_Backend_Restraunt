@@ -1052,12 +1052,28 @@ def receive_goods(
             if conversion <= Decimal("0.0000"):
                 conversion = Decimal("1.0000")
 
+            def norm_uom(u: str) -> str:
+                u = (u or "").strip().upper()
+                if u in ("GM", "GMS", "GRAM", "GRAMS"):
+                    return "G"
+                if u in ("KGS", "KILOGRAM", "KILOGRAMS"):
+                    return "KG"
+                if u in ("LTR", "LTRS", "LITER", "LITERS", "LITRE", "LITRES"):
+                    return "L"
+                if u in ("MLS", "MILLILITER", "MILLILITRE"):
+                    return "ML"
+                return u
+
             recv_unit = (item_input.unit or "").strip().upper()
             purch_unit = (ingredient.purchase_uom or "").strip().upper()
             recipe_unit = (ingredient.recipe_uom or ingredient.unit or "").strip().upper()
 
+            norm_recv = norm_uom(recv_unit)
+            norm_purch = norm_uom(purch_unit)
+            norm_recipe = norm_uom(recipe_unit)
+
             # Convert received quantity and cost to Recipe UOM if received in Purchase UOM (e.g. 10 KG * 1000 = 10,000 G)
-            if recv_unit == purch_unit and recv_unit != recipe_unit:
+            if (norm_recv == norm_purch and norm_recv != norm_recipe) or (norm_recv != norm_recipe and conversion > Decimal("1.0000")):
                 stock_received_qty = round(item_input.quantity_received * conversion, 3)
                 landed_cost_per_recipe_unit = round(landed_unit_cost / conversion, 4)
                 landed_cost_per_purchase_unit = landed_unit_cost
@@ -1075,7 +1091,7 @@ def receive_goods(
                 source_type="grn",
                 source_id=grn_number,
                 actor_id=manager_user.id if manager_user else None,
-                notes=f"GRN {grn_number} - Invoice: {payload.supplier_invoice_no or 'N/A'} (+{item_input.quantity_received} {item_input.unit} = +{stock_received_qty} {recipe_unit})"
+                notes=f"GRN {grn_number} - Invoice: {payload.supplier_invoice_no or 'N/A'} (+{item_input.quantity_received} {item_input.unit} = +{stock_received_qty} {recipe_unit}) @ Landed ₹{landed_unit_cost}/{item_input.unit} (₹{landed_cost_per_recipe_unit}/{recipe_unit})"
             )
             db.add(ledger_entry)
 
@@ -1097,6 +1113,7 @@ def receive_goods(
 
             # 5. Atomically increment ingredient current stock balance (in recipe UOM)
             ingredient.current_stock += stock_received_qty
+            ingredient.last_restocked_at = datetime.utcnow()
 
     # Create GRN header
     grn = RestaurantGRN(
