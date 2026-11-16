@@ -1,7 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
+import re
 
 class DistributorBase(BaseModel):
     name: str
@@ -9,12 +10,26 @@ class DistributorBase(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     address: Optional[str] = None
-    gstin: Optional[str] = None
+    gstin: Optional[str] = Field(None, max_length=15)
     notes: Optional[str] = None
     is_active: bool = True
 
+    @field_validator("gstin", mode="before")
+    @classmethod
+    def validate_gstin(cls, v):
+        if v is None:
+            return None
+        cleaned = str(v).strip().upper()
+        if not cleaned:
+            return None
+        # Remove any non-alphanumeric characters
+        cleaned = re.sub(r'[^A-Z0-9]', '', cleaned)
+        if len(cleaned) > 15:
+            cleaned = cleaned[:15]
+        return cleaned
+
 class DistributorCreate(DistributorBase):
-    shop_id: UUID
+    shop_id: Optional[UUID] = None
 
 class DistributorUpdate(BaseModel):
     name: Optional[str] = None
@@ -28,7 +43,7 @@ class DistributorUpdate(BaseModel):
 
 class DistributorOut(DistributorBase):
     id: UUID
-    shop_id: UUID
+    shop_id: Optional[UUID] = None
     tenant_id: Optional[UUID] = None
     created_at: datetime
 

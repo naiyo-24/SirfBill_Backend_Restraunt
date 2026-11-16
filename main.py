@@ -45,6 +45,45 @@ try:
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_users_name_trgm ON users USING gin (name gin_trgm_ops);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_users_phone_trgm ON users USING gin (phone gin_trgm_ops);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_users_tenant_role ON users (tenant_id, role);"))
+
+        # Inventory & Ingredient Categories schema assurance
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_ingredient_categories (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                outlet_id UUID NOT NULL REFERENCES restaurant_outlets(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL,
+                name VARCHAR(100) NOT NULL,
+                code VARCHAR(50),
+                storage_zone_temp VARCHAR(150),
+                color_code VARCHAR(30),
+                icon VARCHAR(50),
+                description TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES restaurant_ingredient_categories(id) ON DELETE SET NULL;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS storage_zone VARCHAR(100);"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS storage_location VARCHAR(100);"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS purchase_uom VARCHAR(20) DEFAULT 'KG';"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS recipe_uom VARCHAR(20) DEFAULT 'G';"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS uom_conversion_factor NUMERIC(12, 4) DEFAULT 1.0000;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS min_par_level NUMERIC(12, 3) DEFAULT 0.000;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS ideal_par_level NUMERIC(12, 3) DEFAULT 0.000;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS cost_per_purchase_unit NUMERIC(10, 2) DEFAULT 0.00;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS primary_supplier_id UUID REFERENCES distributors(id) ON DELETE SET NULL;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS is_perishable BOOLEAN DEFAULT FALSE;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS shelf_life_days INTEGER;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS last_restocked_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"))
+        
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ing_cat_outlet ON restaurant_ingredient_categories (outlet_id, is_active);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ing_cat_tenant ON restaurant_ingredient_categories (tenant_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ingredients_cat ON restaurant_ingredients (category_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ingredients_outlet_active ON restaurant_ingredients (outlet_id, is_active);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ingredients_tenant ON restaurant_ingredients (tenant_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ingredients_primary_supplier ON restaurant_ingredients (primary_supplier_id);"))
 except Exception as e:
     print(f"Schema startup migration note: {e}")
 

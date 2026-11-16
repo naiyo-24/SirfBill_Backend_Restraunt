@@ -23,10 +23,21 @@ def create_distributor(
     db: Session = Depends(get_db),
     admin_user: User = Depends(get_admin_user)
 ):
-    new_distributor = Distributor(
-        tenant_id=admin_user.tenant_id,
-        **request.model_dump()
-    )
+    req_data = request.model_dump()
+    tenant_id = admin_user.tenant_id
+    shop_id = request.shop_id
+    
+    if not tenant_id and shop_id:
+        from models.shop import Shop
+        shop = db.query(Shop).filter(Shop.id == shop_id).first()
+        if shop:
+            tenant_id = shop.tenant_id
+
+    req_data["tenant_id"] = tenant_id
+    if shop_id:
+        req_data["shop_id"] = shop_id
+
+    new_distributor = Distributor(**req_data)
     db.add(new_distributor)
     db.commit()
     db.refresh(new_distributor)

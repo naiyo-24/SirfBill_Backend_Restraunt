@@ -58,3 +58,5 @@ class RestaurantOutlet(Base):
     tables = relationship("RestaurantTable", back_populates="outlet", cascade="all, delete-orphan")
     orders = relationship("RestaurantOrder", back_populates="outlet")
     shifts = relationship("RestaurantShift", back_populates="outlet")
+    ingredient_categories = relationship("RestaurantIngredientCategory", back_populates="outlet", cascade="all, delete-orphan")
+    ingredients = relationship("RestaurantIngredient", back_populates="outlet", cascade="all, delete-orphan")
