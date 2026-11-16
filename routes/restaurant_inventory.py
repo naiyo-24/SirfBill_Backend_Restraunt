@@ -1,8 +1,14 @@
 from typing import List, Optional
 from uuid import UUID
 from decimal import Decimal
+import os
+import shutil
+import uuid
 import re
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import urllib.request
+import hashlib
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi.responses import Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -434,6 +440,141 @@ def get_ingredients(
     return results
 
 
+@router.post("/ingredients/upload-image")
+async def upload_ingredient_image(
+    file: UploadFile = File(...),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Upload an ingredient image file. Stores in uploads/inventory/ and returns the relative path URL.
+    """
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an image")
+
+    os.makedirs("uploads/inventory", exist_ok=True)
+    orig_ext = os.path.splitext(file.filename)[1].lower() if file.filename else ".jpg"
+    ext = orig_ext if orig_ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"] else ".jpg"
+    filename = f"ing_{uuid.uuid4().hex[:12]}{ext}"
+    file_path = os.path.join("uploads", "inventory", filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    return {"image_url": f"/uploads/inventory/{filename}"}
+
+
+@router.post("/ingredients/upload-from-url")
+def upload_ingredient_from_url(
+    payload: dict,
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Downloads an image from an external URL, saves it into uploads/inventory/
+    and returns {"image_url": "/uploads/inventory/ing_...jpg"}.
+    This completely eliminates CORS issues and ensures the ingredient image is hosted locally.
+    """
+    raw_url = payload.get("url", "").strip() if isinstance(payload, dict) else ""
+    if not (raw_url.startswith("http://") or raw_url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Invalid URL. Must begin with http:// or https://")
+
+    try:
+        req = urllib.request.Request(
+            raw_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            content_type = response.headers.get("content-type", "image/jpeg").lower()
+            data = response.read()
+
+        ext = ".jpg"
+        if "png" in content_type:
+            ext = ".png"
+        elif "webp" in content_type:
+            ext = ".webp"
+        elif "gif" in content_type:
+            ext = ".gif"
+        elif ".png" in raw_url.lower():
+            ext = ".png"
+        elif ".webp" in raw_url.lower():
+            ext = ".webp"
+
+        os.makedirs("uploads/inventory", exist_ok=True)
+        filename = f"ing_{uuid.uuid4().hex[:12]}{ext}"
+        file_path = os.path.join("uploads", "inventory", filename)
+
+        with open(file_path, "wb") as f:
+            f.write(data)
+
+        return {"image_url": f"/uploads/inventory/{filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to download image from link: {str(e)}")
+
+
+@router.api_route("/proxy-image", methods=["GET", "HEAD"])
+def proxy_external_image(url: str = Query(..., description="External image URL to proxy for CORS")):
+    """
+    Proxies external images to bypass browser CORS restrictions in Flutter Web.
+    Caches images locally in uploads/inventory/cache/ for fast subsequent loads.
+    """
+    clean_url = url.strip()
+    if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Invalid URL protocol")
+
+    url_hash = hashlib.md5(clean_url.encode("utf-8")).hexdigest()
+    cache_dir = os.path.join("uploads", "inventory", "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{url_hash}.bin")
+    meta_path = os.path.join(cache_dir, f"{url_hash}.meta")
+
+    if os.path.exists(cache_path) and os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r") as f:
+                content_type = f.read().strip() or "image/jpeg"
+            with open(cache_path, "rb") as f:
+                return Response(
+                    content=f.read(),
+                    media_type=content_type,
+                    headers={
+                        "Cache-Control": "public, max-age=604800",
+                        "Access-Control-Allow-Origin": "*",
+                    }
+                )
+        except Exception:
+            pass
+
+    try:
+        req = urllib.request.Request(
+            clean_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=12) as response:
+            content_type = response.headers.get("content-type", "image/jpeg")
+            image_data = response.read()
+
+            try:
+                with open(cache_path, "wb") as f:
+                    f.write(image_data)
+                with open(meta_path, "w") as f:
+                    f.write(content_type)
+            except Exception:
+                pass
+
+            return Response(
+                content=image_data,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=604800",
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+
+
 @router.post("/ingredients", response_model=RestaurantIngredientResponse, status_code=status.HTTP_201_CREATED)
 def create_ingredient(
     payload: RestaurantIngredientCreate,
@@ -496,6 +637,7 @@ def create_ingredient(
         is_perishable=payload.is_perishable,
         shelf_life_days=payload.shelf_life_days,
         current_stock=payload.current_stock,
+        image_url=payload.image_url,
         is_active=payload.is_active
     )
     db.add(ingredient)

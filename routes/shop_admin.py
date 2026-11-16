@@ -453,6 +453,7 @@ from models.restaurant_order import RestaurantOrder
 from models.restaurant_shift import RestaurantShift
 from models.restaurant_customer import RestaurantCustomer
 from models.restaurant_ingredient import RestaurantIngredient, RestaurantIngredientCategory
+from models.restaurant_procurement import RestaurantSupplier, RestaurantPurchaseOrder, RestaurantGRN
 from models.restaurant_stock_ledger import RestaurantStockLedger
 from models.restaurant_modifier import RestaurantModifierGroup
 from models.restaurant_audit import RestaurantAuditEvent
@@ -512,6 +513,9 @@ def cascade_delete_outlet_and_data(outlet_id: UUID, db: Session):
     db.query(RestaurantIngredient).filter(RestaurantIngredient.outlet_id == outlet_id).delete(synchronize_session=False)
     db.query(RestaurantIngredientCategory).filter(RestaurantIngredientCategory.outlet_id == outlet_id).delete(synchronize_session=False)
     db.query(RestaurantStockLedger).filter(RestaurantStockLedger.outlet_id == outlet_id).delete(synchronize_session=False)
+    db.query(RestaurantGRN).filter(RestaurantGRN.outlet_id == outlet_id).delete(synchronize_session=False)
+    db.query(RestaurantPurchaseOrder).filter(RestaurantPurchaseOrder.outlet_id == outlet_id).delete(synchronize_session=False)
+    db.query(RestaurantSupplier).filter(RestaurantSupplier.outlet_id == outlet_id).delete(synchronize_session=False)
     db.query(RestaurantCustomer).filter(RestaurantCustomer.outlet_id == outlet_id).delete(synchronize_session=False)
     db.query(RestaurantAuditEvent).filter(RestaurantAuditEvent.outlet_id == outlet_id).delete(synchronize_session=False)
 

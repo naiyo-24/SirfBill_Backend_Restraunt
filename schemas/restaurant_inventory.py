@@ -60,6 +60,7 @@ class RestaurantIngredientBase(BaseModel):
     primary_supplier_id: Optional[UUID] = None
     is_perishable: bool = False
     shelf_life_days: Optional[int] = None
+    image_url: Optional[str] = None
     is_active: bool = True
 
 class RestaurantIngredientCreate(RestaurantIngredientBase):
@@ -85,6 +86,7 @@ class RestaurantIngredientUpdate(BaseModel):
     primary_supplier_id: Optional[UUID] = None
     is_perishable: Optional[bool] = None
     shelf_life_days: Optional[int] = None
+    image_url: Optional[str] = None
     is_active: Optional[bool] = None
 
 class RestaurantIngredientResponse(RestaurantIngredientBase):

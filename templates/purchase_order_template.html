@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Purchase Order - {{ po.po_number }}</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 15mm 18mm 15mm 18mm;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1F2937;
+      background: #FFFFFF;
+      font-size: 12px;
+      line-height: 1.4;
+      padding: 10px 15px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* Header */
+    .header-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 18px;
+      border-bottom: 1px solid #E5E7EB;
+    }
+    .outlet-info {
+      max-width: 60%;
+    }
+    .outlet-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 4px;
+      letter-spacing: -0.2px;
+    }
+    .outlet-address {
+      font-size: 11px;
+      color: #4B5563;
+      margin-bottom: 4px;
+      line-height: 1.35;
+    }
+    .outlet-contact {
+      font-size: 11px;
+      color: #4B5563;
+    }
+
+    .po-badge-info {
+      text-align: right;
+    }
+    .po-badge {
+      display: inline-block;
+      background-color: #00B074;
+      color: #FFFFFF;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      padding: 5px 14px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .po-number {
+      font-size: 17px;
+      font-weight: 800;
+      color: #111827;
+      letter-spacing: -0.3px;
+      margin-bottom: 2px;
+    }
+    .po-status {
+      font-size: 11px;
+      font-weight: 600;
+      color: #059669;
+      text-transform: uppercase;
+    }
+
+    /* Vendor & Timeline Dual Boxes */
+    .cards-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 18px 0;
+    }
+    .info-card {
+      flex: 1;
+      background-color: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .card-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #059669;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 4px;
+    }
+    .card-text {
+      font-size: 11.5px;
+      color: #4B5563;
+      margin-bottom: 2px;
+    }
+    .timeline-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11.5px;
+      margin-bottom: 4px;
+    }
+    .delivery-dock-row {
+      margin-top: 4px;
+    }
+    .timeline-key {
+      color: #4B5563;
+    }
+    .timeline-val {
+      font-weight: 600;
+      color: #111827;
+    }
+    .delivery-dock-val {
+      font-weight: normal;
+      max-width: 60%;
+      text-align: right;
+    }
+
+    /* Items Table */
+    .table-container {
+      margin-top: 10px;
+      margin-bottom: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+    }
+    th {
+      background-color: #F9FAFB;
+      color: #4B5563;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 9px 8px;
+      border-top: 1px solid #E5E7EB;
+      border-bottom: 1.5px solid #D1D5DB;
+    }
+    td {
+      padding: 10px 8px;
+      border-bottom: 1px solid #F3F4F6;
+      color: #374151;
+      vertical-align: middle;
+    }
+    .text-center { text-align: center; }
+    .text-left { text-align: left; }
+    .text-right { text-align: right; }
+    .bold { font-weight: 700; color: #111827; }
+
+    .col-index { width: 35px; }
+    .col-qty { width: 70px; }
+    .col-price { width: 100px; }
+    .col-unit { width: 65px; }
+    .col-total { width: 110px; }
+
+    .ingredient-sku {
+      font-size: 10px;
+      color: #6B7280;
+      margin-left: 4px;
+    }
+    .item-notes {
+      font-size: 9.5px;
+      color: #6B7280;
+      font-style: italic;
+    }
+
+    /* Summary Box */
+    .summary-section {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
+      margin-bottom: 40px;
+    }
+    .summary-box {
+      width: 280px;
+      background-color: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      margin-bottom: 6px;
+      color: #4B5563;
+    }
+    .summary-val-dark {
+      font-weight: 600;
+      color: #111827;
+    }
+    .summary-row.total-row {
+      border-top: 1.5px solid #E5E7EB;
+      padding-top: 8px;
+      margin-top: 6px;
+      margin-bottom: 0;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .total-title {
+      color: #111827;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .total-val {
+      color: #00B074;
+      font-size: 14px;
+    }
+
+    .instructions-box {
+      background-color: #F9FAFB;
+      border: 1px dashed #D1D5DB;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 25px;
+      font-size: 11px;
+    }
+
+    /* Signatures Section */
+    .signatures-container {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 60px;
+      padding: 0 20px;
+    }
+    .signature-box {
+      width: 220px;
+      text-align: center;
+    }
+    .signature-line {
+      border-bottom: 1px solid #9CA3AF;
+      margin-bottom: 6px;
+    }
+    .signature-label {
+      font-size: 10.5px;
+      color: #4B5563;
+      font-weight: 500;
+    }
+
+    /* Footer Note */
+    .footer-note {
+      text-align: center;
+      margin-top: 35px;
+      font-size: 9.5px;
+      color: #9CA3AF;
+      letter-spacing: 0.3px;
+    }
+
+    @media print {
+      body {
+        padding: 0;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header-container">
+    <div class="outlet-info">
+      <div class="outlet-name">{{ outlet.name }}</div>
+      <div class="outlet-address">{{ outlet.address or 'Restaurant Kitchen Dock' }}</div>
+      <div class="outlet-contact">
+        {% if outlet.phone %}Phone: {{ outlet.phone }}{% endif %}
+        {% if outlet.phone and outlet.gstin %} | {% endif %}
+        {% if outlet.gstin %}GSTIN: {{ outlet.gstin }}{% endif %}
+      </div>
+    </div>
+    <div class="po-badge-info">
+      <div class="po-badge">PURCHASE ORDER</div>
+      <div class="po-number">{{ po.po_number }}</div>
+      <div class="po-status">Status: {{ status_label }}</div>
+    </div>
+  </div>
+
+  <!-- Vendor & Dispatch Timeline Cards -->
+  <div class="cards-row">
+    <!-- Left: Vendor Info -->
+    <div class="info-card">
+      <div class="card-label">Vendor / Supplier</div>
+      <div class="card-title">{{ supplier.name }}</div>
+      {% if supplier.phone %}
+        <div class="card-text">Phone: {{ supplier.phone }}</div>
+      {% endif %}
+      {% if supplier.email %}
+        <div class="card-text">Email: {{ supplier.email }}</div>
+      {% endif %}
+      {% if supplier.gstin %}
+        <div class="card-text">GSTIN: {{ supplier.gstin }}</div>
+      {% endif %}
+      {% if supplier.address %}
+        <div class="card-text">{{ supplier.address }}</div>
+      {% endif %}
+    </div>
+
+    <!-- Right: Dispatch Timeline -->
+    <div class="info-card">
+      <div class="card-label">Order &amp; Dispatch Timeline</div>
+      <div class="timeline-row">
+        <span class="timeline-key">Order Date:</span>
+        <span class="timeline-val">{{ order_date_formatted }}</span>
+      </div>
+      <div class="timeline-row">
+        <span class="timeline-key">Expected Delivery:</span>
+        <span class="timeline-val">{{ expected_delivery_formatted }}</span>
+      </div>
+      {% if po.delivery_address %}
+      <div class="timeline-row delivery-dock-row">
+        <span class="timeline-key">Delivery Dock:</span>
+        <span class="timeline-val delivery-dock-val">{{ po.delivery_address }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Items Table -->
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th class="text-center col-index">#</th>
+          <th class="text-left">Item / Ingredient</th>
+          <th class="text-center col-qty">Qty</th>
+          <th class="text-center col-price">Est. Price</th>
+          <th class="text-center col-unit">Unit</th>
+          <th class="text-right col-total">Total (INR)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td class="text-center">{{ loop.index }}</td>
+          <td class="text-left">
+            <span class="bold">{{ item.ingredient_name }}</span>
+            {% if item.ingredient_sku %}
+              <span class="ingredient-sku">({{ item.ingredient_sku }})</span>
+            {% endif %}
+            {% if item.notes %}
+              <div class="item-notes">{{ item.notes }}</div>
+            {% endif %}
+          </td>
+          <td class="text-center">{{ "%.1f"|format(item.quantity_ordered|float) }}</td>
+          <td class="text-center">INR {{ "%.2f"|format(item.unit_price|float) }}</td>
+          <td class="text-center">{{ item.unit }}</td>
+          <td class="text-right bold">INR {{ "%.2f"|format(item.total_price|float) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Financial Summary -->
+  <div class="summary-section">
+    <div class="summary-box">
+      <div class="summary-row">
+        <span>Total Items:</span>
+        <span class="summary-val-dark">{{ items|length }} commodities</span>
+      </div>
+      <div class="summary-row">
+        <span>PO Base Subtotal:</span>
+        <span class="summary-val-dark">INR {{ "%.2f"|format(po.subtotal|float) }}</span>
+      </div>
+      <div class="summary-row">
+        <span>Invoice Tax / GST:</span>
+        <span>
+          {% if po.tax_amount and po.tax_amount|float > 0 %}
+            INR {{ "%.2f"|format(po.tax_amount|float) }}
+          {% else %}
+            Settled on GRN
+          {% endif %}
+        </span>
+      </div>
+      <div class="summary-row total-row">
+        <span class="total-title">PO ESTIMATED TOTAL:</span>
+        <span class="total-val">INR {{ "%.2f"|format(po.total_amount|float) }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes if any -->
+  {% if po.notes %}
+  <div class="instructions-box">
+    <strong>Special Instructions:</strong> {{ po.notes }}
+  </div>
+  {% endif %}
+
+  <!-- Signatures -->
+  <div class="signatures-container">
+    <div class="signature-box">
+      <div class="signature-line"></div>
+      <div class="signature-label">Authorized Kitchen Manager</div>
+    </div>
+    <div class="signature-box">
+      <div class="signature-line"></div>
+      <div class="signature-label">Vendor Signature / Stamp</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer-note">
+    Computer-generated Purchase Requisition Document || SirfBill Restaurant POS
+  </div>
+
+  <script>
+    // Auto-trigger print dialog if opened in a popup window
+    if (window.location.search.includes('autoprint=true')) {
+      window.onload = function() {
+        window.print();
+      };
+    }
+  </script>
+</body>
+</html>

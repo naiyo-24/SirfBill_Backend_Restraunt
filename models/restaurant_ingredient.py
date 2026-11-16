@@ -66,6 +66,7 @@ class RestaurantIngredient(Base):
     is_perishable = Column(Boolean, default=False, nullable=False)
     shelf_life_days = Column(Integer, nullable=True)
     last_restocked_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    image_url = Column(Text, nullable=True)
 
     is_active = Column(Boolean, default=True, nullable=False)
 

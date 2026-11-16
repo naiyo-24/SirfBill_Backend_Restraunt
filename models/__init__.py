@@ -43,6 +43,13 @@ from .restaurant_audit import RestaurantAuditEvent
 
 # P1 Inventory & CRM Models
 from .restaurant_ingredient import RestaurantIngredient, RestaurantIngredientCategory
+from .restaurant_procurement import (
+    RestaurantSupplier,
+    RestaurantPurchaseOrder,
+    RestaurantPurchaseOrderItem,
+    RestaurantGRN,
+    RestaurantGRNItem
+)
 from .restaurant_recipe import RestaurantRecipe, RestaurantRecipeLine
 from .restaurant_stock_ledger import RestaurantStockLedger
 from .restaurant_customer import RestaurantCustomer, RestaurantLoyaltyLedger

@@ -60,3 +60,6 @@ class RestaurantOutlet(Base):
     shifts = relationship("RestaurantShift", back_populates="outlet")
     ingredient_categories = relationship("RestaurantIngredientCategory", back_populates="outlet", cascade="all, delete-orphan")
     ingredients = relationship("RestaurantIngredient", back_populates="outlet", cascade="all, delete-orphan")
+    suppliers = relationship("RestaurantSupplier", back_populates="outlet", cascade="all, delete-orphan")
+    purchase_orders = relationship("RestaurantPurchaseOrder", back_populates="outlet", cascade="all, delete-orphan")
+    grns = relationship("RestaurantGRN", back_populates="outlet", cascade="all, delete-orphan")

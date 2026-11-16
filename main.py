@@ -77,6 +77,7 @@ try:
         conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS is_perishable BOOLEAN DEFAULT FALSE;"))
         conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS shelf_life_days INTEGER;"))
         conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS last_restocked_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"))
+        conn.execute(sa.text("ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS image_url TEXT;"))
         
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ing_cat_outlet ON restaurant_ingredient_categories (outlet_id, is_active);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ing_cat_tenant ON restaurant_ingredient_categories (tenant_id);"))
@@ -84,6 +85,142 @@ try:
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ingredients_outlet_active ON restaurant_ingredients (outlet_id, is_active);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ingredients_tenant ON restaurant_ingredients (tenant_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_ingredients_primary_supplier ON restaurant_ingredients (primary_supplier_id);"))
+
+        # Procurement & Purchase Order tables schema assurance
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_suppliers (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                outlet_id UUID NOT NULL REFERENCES restaurant_outlets(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL,
+                name VARCHAR(150) NOT NULL,
+                code VARCHAR(50),
+                contact_person VARCHAR(100),
+                phone VARCHAR(30),
+                email VARCHAR(120),
+                address TEXT,
+                gstin VARCHAR(50),
+                fssai VARCHAR(50),
+                payment_terms VARCHAR(50) DEFAULT 'NET_15',
+                bank_details JSON DEFAULT '{}'::json,
+                notes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_suppliers_outlet ON restaurant_suppliers (outlet_id, is_active);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_suppliers_tenant ON restaurant_suppliers (tenant_id);"))
+
+        conn.execute(sa.text("""
+            INSERT INTO restaurant_suppliers (id, outlet_id, tenant_id, name, code, contact_person, phone, gstin, is_active, created_at, updated_at)
+            SELECT 
+                d.id, 
+                COALESCE(d.shop_id, (SELECT id FROM restaurant_outlets LIMIT 1)), 
+                COALESCE(d.tenant_id, (SELECT tenant_id FROM restaurant_outlets LIMIT 1)),
+                d.name, 
+                'SUP-' || SUBSTRING(UPPER(REGEXP_REPLACE(d.name, '[^a-zA-Z0-9]', '', 'g')) FROM 1 FOR 6),
+                d.contact_person, 
+                d.phone, 
+                d.gstin, 
+                TRUE,
+                COALESCE(d.created_at, NOW()), 
+                NOW()
+            FROM distributors d
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                phone = EXCLUDED.phone,
+                gstin = EXCLUDED.gstin,
+                contact_person = EXCLUDED.contact_person,
+                is_active = TRUE;
+        """))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_purchase_orders (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                outlet_id UUID NOT NULL REFERENCES restaurant_outlets(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL,
+                supplier_id UUID NOT NULL REFERENCES restaurant_suppliers(id) ON DELETE RESTRICT,
+                po_number VARCHAR(50) NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+                order_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                expected_delivery_date DATE,
+                subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                tax_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                delivery_address TEXT,
+                notes TEXT,
+                created_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                approved_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_po_outlet_status ON restaurant_purchase_orders (outlet_id, status);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_po_tenant ON restaurant_purchase_orders (tenant_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_po_supplier ON restaurant_purchase_orders (supplier_id);"))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_purchase_order_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                po_id UUID NOT NULL REFERENCES restaurant_purchase_orders(id) ON DELETE CASCADE,
+                ingredient_id UUID NOT NULL REFERENCES restaurant_ingredients(id) ON DELETE RESTRICT,
+                quantity_ordered NUMERIC(12, 3) NOT NULL,
+                quantity_received NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                unit VARCHAR(20) NOT NULL,
+                unit_price NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                tax_rate NUMERIC(5, 2) NOT NULL DEFAULT 0.00,
+                tax_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                total_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                notes VARCHAR(255)
+            );
+        """))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_po_items_po ON restaurant_purchase_order_items (po_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_po_items_ingredient ON restaurant_purchase_order_items (ingredient_id);"))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_grn (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                outlet_id UUID NOT NULL REFERENCES restaurant_outlets(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL,
+                po_id UUID REFERENCES restaurant_purchase_orders(id) ON DELETE SET NULL,
+                supplier_id UUID NOT NULL REFERENCES restaurant_suppliers(id) ON DELETE RESTRICT,
+                grn_number VARCHAR(50) NOT NULL,
+                supplier_invoice_no VARCHAR(100),
+                invoice_date DATE,
+                received_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                received_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                payment_status VARCHAR(30) NOT NULL DEFAULT 'UNPAID',
+                remarks TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_outlet ON restaurant_grn (outlet_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_po ON restaurant_grn (po_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_supplier ON restaurant_grn (supplier_id);"))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_grn_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                grn_id UUID NOT NULL REFERENCES restaurant_grn(id) ON DELETE CASCADE,
+                ingredient_id UUID NOT NULL REFERENCES restaurant_ingredients(id) ON DELETE RESTRICT,
+                po_item_id UUID REFERENCES restaurant_purchase_order_items(id) ON DELETE SET NULL,
+                quantity_received NUMERIC(12, 3) NOT NULL,
+                quantity_rejected NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                rejection_reason VARCHAR(255),
+                unit VARCHAR(20) NOT NULL,
+                unit_price NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                tax_rate NUMERIC(5, 2) NOT NULL DEFAULT 0.00,
+                tax_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                total_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                batch_number VARCHAR(50),
+                expiry_date DATE
+            );
+        """))
+        conn.execute(sa.text("ALTER TABLE restaurant_grn_items ADD COLUMN IF NOT EXISTS quantity_rejected NUMERIC(12, 3) DEFAULT 0.000;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_grn_items ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(255);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_items_grn ON restaurant_grn_items (grn_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_items_ingredient ON restaurant_grn_items (ingredient_id);"))
 except Exception as e:
     print(f"Schema startup migration note: {e}")
 
@@ -207,6 +344,7 @@ from routes.restaurant_shifts import router as restaurant_shifts_router
 from routes.restaurant_reports import router as restaurant_reports_router
 from routes.restaurant_inventory import router as restaurant_inventory_router
 from routes.restaurant_crm import router as restaurant_crm_router
+from routes.restaurant_procurement import router as restaurant_procurement_router
 
 app.include_router(restaurant_outlets_router)
 app.include_router(restaurant_menu_router)
@@ -218,6 +356,7 @@ app.include_router(restaurant_shifts_router)
 app.include_router(restaurant_reports_router)
 app.include_router(restaurant_inventory_router)
 app.include_router(restaurant_crm_router)
+app.include_router(restaurant_procurement_router)
 
 @app.get("/")
 def read_root():
