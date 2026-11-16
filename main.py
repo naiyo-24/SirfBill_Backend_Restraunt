@@ -195,6 +195,7 @@ try:
                 created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
             );
         """))
+        conn.execute(sa.text("ALTER TABLE restaurant_grn ADD COLUMN IF NOT EXISTS invoice_document_url VARCHAR(500);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_outlet ON restaurant_grn (outlet_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_po ON restaurant_grn (po_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_supplier ON restaurant_grn (supplier_id);"))
