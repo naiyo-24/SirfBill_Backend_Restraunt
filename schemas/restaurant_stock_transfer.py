@@ -30,6 +30,8 @@ class StockTransferDispatchInput(BaseModel):
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
     notes: Optional[str] = None
+    sender_signature: Optional[str] = None
+    driver_signature: Optional[str] = None
 
 class StockTransferReceiveItemInput(BaseModel):
     item_id: UUID # id of the transfer item
@@ -40,6 +42,7 @@ class StockTransferReceiveItemInput(BaseModel):
 class StockTransferReceiveInput(BaseModel):
     items: List[StockTransferReceiveItemInput]
     notes: Optional[str] = None
+    receiver_signature: Optional[str] = None
 
 class StockTransferItemResponse(BaseModel):
     id: UUID
@@ -93,6 +96,9 @@ class StockTransferResponse(BaseModel):
     vehicle_number: Optional[str] = None
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
+    sender_signature: Optional[str] = None
+    driver_signature: Optional[str] = None
+    receiver_signature: Optional[str] = None
     total_items: int
     total_valuation: Decimal
     notes: Optional[str] = None

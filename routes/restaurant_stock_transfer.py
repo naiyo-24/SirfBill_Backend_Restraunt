@@ -4,6 +4,8 @@ from decimal import Decimal
 from datetime import datetime, date
 import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import HTMLResponse, Response
+from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session, joinedload
 
@@ -108,6 +110,9 @@ def map_transfer_to_response(transfer: RestaurantStockTransfer) -> StockTransfer
         vehicle_number=transfer.vehicle_number,
         driver_name=transfer.driver_name,
         driver_phone=transfer.driver_phone,
+        sender_signature=transfer.sender_signature,
+        driver_signature=transfer.driver_signature,
+        receiver_signature=transfer.receiver_signature,
         total_items=transfer.total_items,
         total_valuation=transfer.total_valuation,
         notes=transfer.notes,
@@ -433,6 +438,10 @@ def dispatch_stock_transfer(
             transfer.driver_name = payload.driver_name
         if payload.driver_phone:
             transfer.driver_phone = payload.driver_phone
+        if payload.sender_signature:
+            transfer.sender_signature = payload.sender_signature
+        if payload.driver_signature:
+            transfer.driver_signature = payload.driver_signature
         if payload.notes:
             transfer.notes = f"{transfer.notes or ''}\nDispatch note: {payload.notes}".strip()
 
@@ -545,6 +554,8 @@ def receive_stock_transfer(
 
     if payload.notes:
         transfer.notes = f"{transfer.notes or ''}\nReceive note: {payload.notes}".strip()
+    if payload.receiver_signature:
+        transfer.receiver_signature = payload.receiver_signature
 
     transfer.received_at = datetime.utcnow()
     transfer.received_by_id = current_user.id if current_user else None
@@ -737,3 +748,118 @@ def cancel_stock_transfer(
     db.refresh(transfer)
 
     return map_transfer_to_response(transfer)
+
+
+# ----------------- DIGITAL CHALLAN / BILL RENDERING -----------------
+
+transfer_template_env = Environment(loader=FileSystemLoader(searchpath="./templates"))
+
+def render_transfer_challan_html(transfer: RestaurantStockTransfer, autoprint: bool = False) -> str:
+    from_outlet = transfer.from_outlet
+    to_outlet = transfer.to_outlet
+
+    dispatched_by_name = (
+        transfer.dispatched_by.name or transfer.dispatched_by.username
+        if transfer.dispatched_by else (transfer.initiated_by.name if transfer.initiated_by else "Storekeeper")
+    )
+    received_by_name = (
+        transfer.received_by.name or transfer.received_by.username
+        if transfer.received_by else "Pending Verification"
+    )
+
+    items_data = []
+    total_qty_dispatched = Decimal("0.00")
+    total_qty_received = Decimal("0.00")
+    total_variance_cost = Decimal("0.00")
+    has_variance = False
+
+    for it in (transfer.items or []):
+        qty_req = it.quantity_requested or Decimal("0.00")
+        qty_disp = it.quantity_dispatched or Decimal("0.00")
+        qty_recv = it.quantity_received or Decimal("0.00")
+        var = it.quantity_variance or Decimal("0.00")
+        u_cost = it.unit_cost or Decimal("0.00")
+        t_cost = it.total_cost or Decimal("0.00")
+
+        total_qty_dispatched += qty_disp
+        total_qty_received += qty_recv
+
+        if var > Decimal("0.00"):
+            has_variance = True
+            total_variance_cost += (var * u_cost)
+
+        items_data.append({
+            "ingredient_name": it.ingredient_name,
+            "sku": it.sku,
+            "unit": it.unit,
+            "quantity_requested": float(qty_req),
+            "quantity_dispatched": float(qty_disp),
+            "quantity_received": float(qty_recv),
+            "quantity_variance": float(var),
+            "is_loss": float(var) > 0.0001,
+            "is_surplus": float(var) < -0.0001,
+            "unit_cost": float(u_cost),
+            "total_cost": float(t_cost),
+            "variance_reason": it.variance_reason,
+            "batch_number": it.batch_number
+        })
+
+    created_fmt = transfer.created_at.strftime("%d %b %Y, %I:%M %p") if transfer.created_at else "N/A"
+    disp_fmt = transfer.dispatched_at.strftime("%d %b %Y, %I:%M %p") if transfer.dispatched_at else "N/A"
+    recv_fmt = transfer.received_at.strftime("%d %b %Y, %I:%M %p") if transfer.received_at else "N/A"
+
+    template = transfer_template_env.get_template("stock_transfer_bill_template.html")
+    return template.render(
+        transfer=transfer,
+        from_outlet=from_outlet,
+        to_outlet=to_outlet,
+        brand_name=from_outlet.name if from_outlet else "SirfBill Restaurant",
+        items=items_data,
+        has_variance=has_variance,
+        total_variance_cost=float(total_variance_cost),
+        total_qty_dispatched=float(total_qty_dispatched),
+        total_qty_received=float(total_qty_received),
+        dispatched_by_name=dispatched_by_name,
+        received_by_name=received_by_name,
+        sender_signature=transfer.sender_signature,
+        driver_signature=transfer.driver_signature,
+        receiver_signature=transfer.receiver_signature,
+        created_date_formatted=created_fmt,
+        dispatched_at_formatted=disp_fmt,
+        received_at_formatted=recv_fmt,
+        autoprint=autoprint
+    )
+
+
+@router.get("/{transfer_id}/bill", response_class=HTMLResponse)
+@router.get("/{transfer_id}/print", response_class=HTMLResponse)
+def get_stock_transfer_digital_bill(
+    transfer_id: UUID,
+    autoprint: bool = Query(False, description="Set to true to immediately open system print dialog"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Renders the responsive Digital Bill / Stock Transfer Delivery Challan.
+    Can be viewed on screen, embedded in Flutter WebView/Dialog, or printed as A4 / PDF.
+    Pass ?autoprint=true to trigger the print dialog automatically.
+    """
+    transfer = (
+        db.query(RestaurantStockTransfer)
+        .options(
+            joinedload(RestaurantStockTransfer.from_outlet),
+            joinedload(RestaurantStockTransfer.to_outlet),
+            joinedload(RestaurantStockTransfer.initiated_by),
+            joinedload(RestaurantStockTransfer.dispatched_by),
+            joinedload(RestaurantStockTransfer.received_by),
+            joinedload(RestaurantStockTransfer.items)
+        )
+        .filter(RestaurantStockTransfer.id == transfer_id)
+        .first()
+    )
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Stock transfer not found")
+
+    html_content = render_transfer_challan_html(transfer, autoprint=autoprint)
+    return HTMLResponse(content=html_content)
+

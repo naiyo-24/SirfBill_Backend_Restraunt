@@ -42,6 +42,11 @@ class RestaurantStockTransfer(Base):
     driver_name = Column(String(100), nullable=True)
     driver_phone = Column(String(50), nullable=True)
 
+    # Digital Signatures (Base64 PNG or SVG)
+    sender_signature = Column(Text, nullable=True)
+    driver_signature = Column(Text, nullable=True)
+    receiver_signature = Column(Text, nullable=True)
+
     total_items = Column(Integer, default=0, nullable=False)
     total_valuation = Column(Numeric(12, 2), default=0.00, nullable=False) # Total financial value in INR
     notes = Column(Text, nullable=True)

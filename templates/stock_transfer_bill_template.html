@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stock Transfer Challan - {{ transfer.transfer_number }}</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm 15mm 12mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1F2937;
+      background: #F9FAFB;
+      font-size: 11.5px;
+      line-height: 1.4;
+      padding: 16px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* Action bar for web/browser viewing */
+    .no-print-bar {
+      max-width: 820px;
+      margin: 0 auto 14px auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #111827;
+      color: #FFFFFF;
+      padding: 10px 18px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+    .bar-info {
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .bar-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 11.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+    .btn-print {
+      background: #00B074;
+      color: #FFFFFF;
+    }
+    .btn-print:hover {
+      background: #059669;
+    }
+    .btn-close {
+      background: #374151;
+      color: #F3F4F6;
+    }
+    .btn-close:hover {
+      background: #4B5563;
+    }
+
+    /* Paper Document Container */
+    .challan-sheet {
+      max-width: 820px;
+      margin: 0 auto;
+      background: #FFFFFF;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      padding: 24px 28px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+    }
+
+    /* Header */
+    .header-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 14px;
+      border-bottom: 2px solid #111827;
+    }
+    .brand-col {
+      max-width: 60%;
+    }
+    .brand-name {
+      font-size: 19px;
+      font-weight: 800;
+      color: #111827;
+      letter-spacing: -0.2px;
+      margin-bottom: 3px;
+    }
+    .doc-type-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #00B074;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 4px;
+    }
+    .brand-address {
+      font-size: 11px;
+      color: #4B5563;
+      line-height: 1.35;
+    }
+
+    .meta-col {
+      text-align: right;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 14px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    .status-draft { background: #FEF3C7; color: #92400E; }
+    .status-in_transit { background: #DBEAFE; color: #1E40AF; }
+    .status-completed { background: #D1FAE5; color: #065F46; }
+    .status-cancelled { background: #FEE2E2; color: #991B1B; }
+
+    .transfer-no {
+      font-size: 17px;
+      font-weight: 800;
+      color: #111827;
+      letter-spacing: -0.2px;
+      margin-bottom: 2px;
+    }
+    .transfer-date {
+      font-size: 11px;
+      color: #6B7280;
+    }
+
+    /* Cards Row: Origin vs Destination */
+    .cards-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      margin: 16px 0 12px 0;
+    }
+    .info-card {
+      flex: 1;
+      background-color: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .info-card.source-card {
+      border-left: 3.5px solid #2563EB;
+    }
+    .info-card.dest-card {
+      border-left: 3.5px solid #00B074;
+    }
+    .card-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .source-card .card-label { color: #2563EB; }
+    .dest-card .card-label { color: #00B074; }
+
+    .card-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 3px;
+    }
+    .card-text {
+      font-size: 11px;
+      color: #4B5563;
+      line-height: 1.35;
+      margin-bottom: 2px;
+    }
+    .station-tag {
+      display: inline-block;
+      background: #E5E7EB;
+      color: #1F2937;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+
+    /* Logistics Ribbon */
+    .logistics-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      background: #F3F4F6;
+      border: 1px solid #E5E7EB;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 14px;
+      font-size: 11px;
+    }
+    .strip-item-title {
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-bottom: 2px;
+    }
+    .strip-item-val {
+      font-weight: 600;
+      color: #111827;
+    }
+
+    /* Commodities Table */
+    .table-container {
+      margin-bottom: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+    th {
+      background-color: #F9FAFB;
+      color: #374151;
+      font-size: 9.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 8px 6px;
+      border-top: 1px solid #E5E7EB;
+      border-bottom: 1.5px solid #D1D5DB;
+    }
+    td {
+      padding: 8px 6px;
+      border-bottom: 1px solid #F3F4F6;
+      color: #374151;
+      vertical-align: middle;
+    }
+    tr:nth-child(even) td {
+      background-color: #FAFAFA;
+    }
+    .text-center { text-align: center; }
+    .text-left { text-align: left; }
+    .text-right { text-align: right; }
+    .bold { font-weight: 700; color: #111827; }
+
+    .item-name {
+      font-weight: 700;
+      color: #111827;
+    }
+    .item-sub {
+      font-size: 9.5px;
+      color: #6B7280;
+    }
+    .pill-variance-loss {
+      background: #FEE2E2;
+      color: #DC2626;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-weight: 700;
+      font-size: 9.5px;
+    }
+    .pill-variance-zero {
+      color: #059669;
+      font-weight: 600;
+    }
+
+    /* Variance Alert */
+    .variance-box {
+      background: #FFFBEB;
+      border: 1px solid #FDE68A;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 14px;
+      font-size: 10.5px;
+      color: #92400E;
+    }
+
+    /* Summary & Notes */
+    .bottom-section {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 10px;
+      margin-bottom: 24px;
+    }
+    .notes-box {
+      flex: 1;
+      background: #F9FAFB;
+      border: 1px dashed #D1D5DB;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 10.5px;
+      color: #4B5563;
+    }
+    .notes-title {
+      font-weight: 700;
+      color: #111827;
+      text-transform: uppercase;
+      font-size: 9.5px;
+      margin-bottom: 3px;
+    }
+
+    .summary-box {
+      width: 290px;
+      background: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #4B5563;
+      margin-bottom: 4px;
+    }
+    .summary-row.total-row {
+      border-top: 1.5px solid #E5E7EB;
+      padding-top: 6px;
+      margin-top: 6px;
+      margin-bottom: 0;
+      font-size: 12.5px;
+      font-weight: 800;
+    }
+    .total-title {
+      color: #111827;
+      text-transform: uppercase;
+      font-size: 10.5px;
+    }
+    .total-val {
+      color: #00B074;
+      font-size: 14px;
+    }
+
+    /* Tripartite Signatures */
+    .signatures-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 36px;
+      padding: 0 10px;
+    }
+    .sig-col {
+      width: 200px;
+      text-align: center;
+    }
+    .sig-line {
+      border-bottom: 1px solid #9CA3AF;
+      margin-bottom: 5px;
+      height: 24px;
+    }
+    .sig-img-wrap {
+      height: 44px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      border-bottom: 1px solid #9CA3AF;
+      margin-bottom: 5px;
+    }
+    .drawn-sig-img {
+      max-height: 40px;
+      max-width: 170px;
+      object-fit: contain;
+    }
+    .sig-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #111827;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .sig-name {
+      font-size: 9.5px;
+      color: #6B7280;
+      margin-top: 1px;
+    }
+
+    .footer-stamp {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 9.5px;
+      color: #9CA3AF;
+    }
+
+    @media print {
+      body {
+        background: #FFFFFF;
+        padding: 0;
+      }
+      .no-print-bar {
+        display: none !important;
+      }
+      .challan-sheet {
+        border: none;
+        box-shadow: none;
+        padding: 0;
+        max-width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Web View Action Bar (Hidden during Print) -->
+  <div class="no-print-bar">
+    <div class="bar-info">
+      <span>📄 Stock Transfer Challan:</span>
+      <strong>{{ transfer.transfer_number }}</strong>
+      <span style="font-size: 11px; opacity: 0.85;">[{{ transfer.status }}]</span>
+    </div>
+    <div class="bar-actions">
+      <button class="btn btn-close" onclick="window.close(); if(!window.closed) window.history.back();">Close</button>
+      <button class="btn btn-print" onclick="window.print()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 6 2 18 2 18 9"></polyline>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+          <rect x="6" y="14" width="12" height="8"></rect>
+        </svg>
+        Print / Save PDF
+      </button>
+    </div>
+  </div>
+
+  <!-- A4 Printable Sheet -->
+  <div class="challan-sheet">
+
+    <!-- Header -->
+    <div class="header-container">
+      <div class="brand-col">
+        <div class="brand-name">{{ brand_name or (from_outlet.name if from_outlet else 'SirfBill Kitchen') }}</div>
+        <div class="doc-type-title">
+          {% if transfer.transfer_type == 'INTER_STATION' %}
+            Internal Kitchen Station Movement Note
+          {% else %}
+            Stock Transfer Delivery Challan
+          {% endif %}
+        </div>
+        <div class="brand-address">
+          {% if from_outlet and from_outlet.address %}{{ from_outlet.address }}{% endif %}
+          {% if from_outlet and from_outlet.city %}, {{ from_outlet.city }}{% endif %}
+          {% if from_outlet and from_outlet.phone %} | Phone: {{ from_outlet.phone }}{% endif %}
+          {% if from_outlet and from_outlet.gstin %} | GSTIN: {{ from_outlet.gstin }}{% endif %}
+        </div>
+      </div>
+
+      <div class="meta-col">
+        <div class="status-badge status-{{ (transfer.status or 'draft')|lower }}">
+          {{ transfer.status }}
+        </div>
+        <div class="transfer-no">{{ transfer.transfer_number }}</div>
+        <div class="transfer-date">Created: {{ created_date_formatted }}</div>
+        <div class="transfer-date">Mode: <strong>{{ transfer.transfer_type }}</strong></div>
+      </div>
+    </div>
+
+    <!-- Cards Row: Origin & Destination -->
+    <div class="cards-row">
+      <!-- Origin -->
+      <div class="info-card source-card">
+        <div class="card-label">Dispatched From (Origin)</div>
+        <div class="card-title">{{ from_outlet.name if from_outlet else 'Central Store' }}</div>
+        <div class="card-text">
+          {{ from_outlet.address if (from_outlet and from_outlet.address) else 'Central Kitchen / Warehouse' }}
+          {% if from_outlet and from_outlet.phone %}<br>Contact: {{ from_outlet.phone }}{% endif %}
+        </div>
+        <div>
+          <span class="station-tag">Station: {{ transfer.from_station or 'Central Cold Store' }}</span>
+        </div>
+        <div class="card-text" style="margin-top: 6px; font-size: 10px; color: #6B7280;">
+          Dispatched By: <strong>{{ dispatched_by_name or 'Storekeeper' }}</strong>
+          {% if transfer.dispatched_at %} • {{ dispatched_at_formatted }}{% endif %}
+        </div>
+      </div>
+
+      <!-- Destination -->
+      <div class="info-card dest-card">
+        <div class="card-label">Delivered To (Destination)</div>
+        <div class="card-title">{{ to_outlet.name if to_outlet else 'Outlet Kitchen' }}</div>
+        <div class="card-text">
+          {{ to_outlet.address if (to_outlet and to_outlet.address) else 'Branch Kitchen Receiving Dock' }}
+          {% if to_outlet and to_outlet.phone %}<br>Contact: {{ to_outlet.phone }}{% endif %}
+        </div>
+        <div>
+          <span class="station-tag">Station: {{ transfer.to_station or 'Main Kitchen Line' }}</span>
+        </div>
+        <div class="card-text" style="margin-top: 6px; font-size: 10px; color: #6B7280;">
+          Received By: <strong>{{ received_by_name or 'Pending Verification' }}</strong>
+          {% if transfer.received_at %} • {{ received_at_formatted }}{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Logistics Ribbon -->
+    <div class="logistics-strip">
+      <div>
+        <div class="strip-item-title">Vehicle / Van No.</div>
+        <div class="strip-item-val">{{ transfer.vehicle_number or 'In-House Transfer' }}</div>
+      </div>
+      <div>
+        <div class="strip-item-title">Driver / Courier</div>
+        <div class="strip-item-val">{{ transfer.driver_name or 'Internal Porter' }}</div>
+      </div>
+      <div>
+        <div class="strip-item-title">Driver Contact</div>
+        <div class="strip-item-val">{{ transfer.driver_phone or 'N/A' }}</div>
+      </div>
+      <div>
+        <div class="strip-item-title">Total Commodities</div>
+        <div class="strip-item-val">{{ items|length }} Item(s)</div>
+      </div>
+    </div>
+
+    <!-- Commodities Table -->
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th class="text-center" style="width: 28px;">#</th>
+            <th class="text-left">Item / Raw Material</th>
+            <th class="text-center" style="width: 48px;">Unit</th>
+            <th class="text-right" style="width: 72px;">Requested</th>
+            <th class="text-right" style="width: 76px;">Dispatched</th>
+            <th class="text-right" style="width: 76px;">Received</th>
+            <th class="text-center" style="width: 72px;">Variance</th>
+            <th class="text-right" style="width: 75px;">Unit Rate</th>
+            <th class="text-right" style="width: 90px;">Total (INR)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+          <tr>
+            <td class="text-center">{{ loop.index }}</td>
+            <td class="text-left">
+              <span class="item-name">{{ it.ingredient_name }}</span>
+              {% if it.sku or it.batch_number %}
+                <div class="item-sub">
+                  {% if it.sku %}SKU: {{ it.sku }}{% endif %}
+                  {% if it.sku and it.batch_number %} | {% endif %}
+                  {% if it.batch_number %}Lot: {{ it.batch_number }}{% endif %}
+                </div>
+              {% endif %}
+            </td>
+            <td class="text-center">{{ it.unit }}</td>
+            <td class="text-right">{{ "%.2f"|format(it.quantity_requested|float) }}</td>
+            <td class="text-right bold">{{ "%.2f"|format(it.quantity_dispatched|float) }}</td>
+            <td class="text-right bold" style="color: #059669;">{{ "%.2f"|format(it.quantity_received|float) }}</td>
+            <td class="text-center">
+              {% if it.quantity_variance|float > 0 %}
+                <span class="pill-variance-loss">-{{ "%.2f"|format(it.quantity_variance|float) }}</span>
+              {% elif it.quantity_variance|float < 0 %}
+                <span style="color: #2563EB; font-weight: 700;">+{{ "%.2f"|format((it.quantity_variance|float)|abs) }}</span>
+              {% else %}
+                <span class="pill-variance-zero">✓ 0.00</span>
+              {% endif %}
+            </td>
+            <td class="text-right">₹{{ "%.2f"|format(it.unit_cost|float) }}</td>
+            <td class="text-right bold">₹{{ "%.2f"|format(it.total_cost|float) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Variance Alert (Shown only if shrinkage occurred) -->
+    {% if has_variance %}
+    <div class="variance-box">
+      <strong>⚠️ Transit Shrinkage / Loss Acknowledged:</strong>
+      Total loss of ₹{{ "%.2f"|format(total_variance_cost|float) }} recorded in stock ledger.
+      {% for it in items %}
+        {% if it.quantity_variance|float > 0 and it.variance_reason %}
+          <br>• {{ it.ingredient_name }}: short by {{ "%.2f"|format(it.quantity_variance|float) }} {{ it.unit }} (Reason: {{ it.variance_reason }})
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Bottom Section: Notes & Summary -->
+    <div class="bottom-section">
+      <div class="notes-box">
+        <div class="notes-title">Instructions &amp; Handling Protocol</div>
+        <div>
+          {{ transfer.notes or 'Commodities dispatched in sanitized food-grade containers. Maintain temperature cold-chain where applicable. Verify container seals and weigh immediately upon arrival.' }}
+        </div>
+        <div style="margin-top: 6px; font-size: 9.5px; color: #9CA3AF;">
+          Governed under Section 143 / Rule 55 of CGST Rules (Delivery Challan for Transfer of Stock without Sale).
+        </div>
+      </div>
+
+      <div class="summary-box">
+        <div class="summary-row">
+          <span>Total Commodities:</span>
+          <span class="bold">{{ items|length }} item(s)</span>
+        </div>
+        <div class="summary-row">
+          <span>Total Qty Dispatched:</span>
+          <span>{{ "%.2f"|format(total_qty_dispatched|float) }} Units</span>
+        </div>
+        <div class="summary-row">
+          <span>Total Qty Received:</span>
+          <span>{{ "%.2f"|format(total_qty_received|float) }} Units</span>
+        </div>
+        {% if has_variance %}
+        <div class="summary-row" style="color: #DC2626;">
+          <span>Transit Loss Value:</span>
+          <span>-₹{{ "%.2f"|format(total_variance_cost|float) }}</span>
+        </div>
+        {% endif %}
+        <div class="summary-row total-row">
+          <span class="total-title">NET TRANSFER VALUATION:</span>
+          <span class="total-val">₹{{ "%.2f"|format(transfer.total_valuation|float) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tripartite Signatures -->
+    <div class="signatures-row">
+      <div class="sig-col">
+        {% if sender_signature %}
+          <div class="sig-img-wrap"><img src="{{ sender_signature }}" alt="Sender Sign" class="drawn-sig-img" /></div>
+        {% else %}
+          <div class="sig-line"></div>
+        {% endif %}
+        <div class="sig-label">Dispatched By</div>
+        <div class="sig-name">{{ dispatched_by_name or 'Storekeeper' }}</div>
+      </div>
+      <div class="sig-col">
+        {% if driver_signature %}
+          <div class="sig-img-wrap"><img src="{{ driver_signature }}" alt="Driver Sign" class="drawn-sig-img" /></div>
+        {% else %}
+          <div class="sig-line"></div>
+        {% endif %}
+        <div class="sig-label">Carrier / Transporter</div>
+        <div class="sig-name">{{ transfer.driver_name or 'Driver Signature' }}</div>
+      </div>
+      <div class="sig-col">
+        {% if receiver_signature %}
+          <div class="sig-img-wrap"><img src="{{ receiver_signature }}" alt="Receiver Sign" class="drawn-sig-img" /></div>
+        {% else %}
+          <div class="sig-line"></div>
+        {% endif %}
+        <div class="sig-label">Received &amp; Verified By</div>
+        <div class="sig-name">{{ received_by_name or 'Receiving Chef / Manager' }}</div>
+      </div>
+    </div>
+
+    <div class="footer-stamp">
+      Computer-Generated Delivery Challan || SirfBill Enterprise Restaurant POS &amp; Inventory Management System
+    </div>
+
+  </div>
+
+  <script>
+    // Trigger browser print dialog if autoprint flag is passed
+    if (window.location.search.includes('autoprint=true') || {% if autoprint %}true{% else %}false{% endif %}) {
+      window.onload = function() {
+        window.print();
+      };
+    }
+  </script>
+</body>
+</html>
