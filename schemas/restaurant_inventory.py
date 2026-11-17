@@ -1,6 +1,6 @@
 from typing import Optional, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
@@ -96,6 +96,7 @@ class RestaurantIngredientResponse(RestaurantIngredientBase):
     category_name: Optional[str] = None
     category_code: Optional[str] = None
     primary_supplier_name: Optional[str] = None
+    is_negative_stock: bool = False
     last_restocked_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -112,11 +113,12 @@ class RestaurantIngredientResponse(RestaurantIngredientBase):
 
 
 
-# Stock Ledger
+# Stock Ledger & Adjustments
 class StockAdjustmentCreate(BaseModel):
     ingredient_id: UUID
-    signed_quantity: Decimal # Positive for addition, Negative for wastage
-    reason: str # PURCHASE_RECEIVED, WASTAGE, PHYSICAL_COUNT_ADJUSTMENT
+    signed_quantity: Decimal # Positive for addition/surplus, Negative for wastage/deficit
+    input_uom: Optional[str] = "RECIPE" # "PURCHASE" (e.g. KG) or "RECIPE" (e.g. GM)
+    reason: str # PURCHASE_RECEIVED, WASTAGE, PHYSICAL_COUNT_ADJUSTMENT, SPOILAGE, BREAKAGE
     notes: Optional[str] = None
 
 class StockLedgerResponse(BaseModel):
@@ -125,6 +127,8 @@ class StockLedgerResponse(BaseModel):
     outlet_id: UUID
     tenant_id: UUID
     signed_quantity: Decimal
+    unit_cost_at_time: Decimal = Decimal("0.0000")
+    total_cost: Decimal = Decimal("0.00")
     reason: str
     source_type: Optional[str] = None
     source_id: Optional[str] = None
@@ -132,10 +136,56 @@ class StockLedgerResponse(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
 
+    @field_serializer("signed_quantity", "unit_cost_at_time", "total_cost", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
     model_config = ConfigDict(from_attributes=True)
 
 
+# Bulk Stock Audit Schemas
+class StockAuditItemInput(BaseModel):
+    ingredient_id: UUID
+    physical_count: Decimal # Count observed during physical count
+    input_uom: Optional[str] = "RECIPE" # "RECIPE" or "PURCHASE"
+    notes: Optional[str] = None
+
+class StockAuditBatchCreate(BaseModel):
+    outlet_id: Optional[UUID] = None
+    audit_date: Optional[date] = None
+    notes: Optional[str] = None
+    items: List[StockAuditItemInput]
+
+class StockAuditItemResult(BaseModel):
+    ingredient_id: UUID
+    ingredient_name: str
+    recipe_uom: str
+    purchase_uom: str
+    previous_stock: Decimal
+    physical_count: Decimal
+    variance: Decimal # physical_count - previous_stock (in recipe unit)
+    variance_rupees: Decimal # variance * unit_cost
+    status: str # "MATCHED", "SURPLUS", "DEFICIT"
+
+class StockAuditBatchResponse(BaseModel):
+    audit_batch_id: str
+    audit_date: date
+    outlet_id: UUID
+    total_items_audited: int
+    items_adjusted: int
+    total_surplus_rupees: Decimal
+    total_deficit_rupees: Decimal
+    net_variance_rupees: Decimal
+    results: List[StockAuditItemResult]
+
+
 # Recipe
+from schemas.restaurant_stock_transfer import (
+    StockTransferItemInput, StockTransferCreate, StockTransferDispatchInput,
+    StockTransferReceiveItemInput, StockTransferReceiveInput,
+    StockTransferItemResponse, StockTransferResponse
+)
+
 class RecipeLineInput(BaseModel):
     ingredient_id: UUID
     quantity_required: Decimal

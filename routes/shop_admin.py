@@ -232,6 +232,7 @@ from models.restaurant_outlet import RestaurantOutlet
 
 @router.get("s", response_model=List[ShopResponse])
 async def get_shops(
+    all_branches: Optional[bool] = False,
     db: Session = Depends(get_db),
     admin_user: Optional[User] = Depends(get_optional_admin_user)
 ):
@@ -239,7 +240,9 @@ async def get_shops(
     Admin Action: Get all shops/outlets for the current tenant with all 5 sections.
     """
     query = db.query(RestaurantOutlet)
-    if admin_user and admin_user.outlet_id and (not admin_user.role or admin_user.role.upper() not in ['ADMIN', 'OWNER', 'SUPER_ADMIN']):
+    user_role = (admin_user.role or "").upper() if admin_user else ""
+    is_multi_branch = all_branches or (user_role in ['ADMIN', 'OWNER', 'SUPER_ADMIN', 'SUPERADMIN', 'MANAGER', 'INVENTORY', 'STOCK'])
+    if not is_multi_branch and admin_user and admin_user.outlet_id:
         query = query.filter(RestaurantOutlet.id == admin_user.outlet_id)
     outlets = query.all()
     if outlets:

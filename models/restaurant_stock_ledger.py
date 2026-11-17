@@ -21,6 +21,8 @@ class RestaurantStockLedger(Base):
 
     # Positive for stock-in, Negative for consumption / wastage
     signed_quantity = Column(Numeric(12, 3), nullable=False)
+    unit_cost_at_time = Column(Numeric(12, 4), default=0.0000, nullable=False) # Exact recipe UOM unit cost at transaction time
+    total_cost = Column(Numeric(12, 2), default=0.00, nullable=False) # Financial valuation impact in INR (abs(signed_qty) * unit_cost)
     reason = Column(String(50), nullable=False) # PURCHASE_RECEIVED, ORDER_CONSUMPTION, WASTAGE, PHYSICAL_COUNT_ADJUSTMENT, REVERSAL
     source_type = Column(String(50), nullable=True) # order, purchase_bill, manual
     source_id = Column(String(100), nullable=True)

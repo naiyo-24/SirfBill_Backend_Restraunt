@@ -44,7 +44,33 @@ def upgrade() -> None:
     conn.execute(sa.text("ALTER TABLE restaurant_grn_items ADD COLUMN IF NOT EXISTS quantity_rejected NUMERIC(12, 3) DEFAULT 0.000;"))
     conn.execute(sa.text("ALTER TABLE restaurant_grn_items ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(255);"))
 
-    # 4. Populate restaurant_suppliers from existing distributors table for instant onboarding
+    # 4. Stock Ledger Historical Cost Snapshots & Immutability Trigger
+    conn.execute(sa.text("ALTER TABLE restaurant_stock_ledger ADD COLUMN IF NOT EXISTS unit_cost_at_time NUMERIC(12, 4) DEFAULT 0.0000;"))
+    conn.execute(sa.text("ALTER TABLE restaurant_stock_ledger ADD COLUMN IF NOT EXISTS total_cost NUMERIC(12, 2) DEFAULT 0.00;"))
+    conn.execute(sa.text("ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS allow_negative_stock BOOLEAN DEFAULT TRUE;"))
+
+    conn.execute(sa.text("""
+        CREATE OR REPLACE FUNCTION trg_prevent_stock_ledger_mutation()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            RAISE EXCEPTION 'restaurant_stock_ledger is append-only. Updates and deletions are strictly forbidden. Use REVERSAL transactions instead.';
+        END;
+        $$ LANGUAGE plpgsql;
+    """))
+    conn.execute(sa.text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_trigger WHERE tgname = 'trg_stock_ledger_immutable'
+            ) THEN
+                CREATE TRIGGER trg_stock_ledger_immutable
+                BEFORE UPDATE OR DELETE ON restaurant_stock_ledger
+                FOR EACH ROW EXECUTE FUNCTION trg_prevent_stock_ledger_mutation();
+            END IF;
+        END $$;
+    """))
+
+    # 5. Populate restaurant_suppliers from existing distributors table for instant onboarding
     conn.execute(sa.text("""
         INSERT INTO restaurant_suppliers (id, outlet_id, tenant_id, name, code, contact_person, phone, gstin, is_active, created_at, updated_at)
         SELECT 

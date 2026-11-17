@@ -19,6 +19,7 @@ class RestaurantOutlet(Base):
     currency = Column(String(10), default="INR", nullable=False)
     
     service_settings = Column(JSON, default=dict) # e.g. {"dine_in_enabled": True, "takeaway_enabled": True, "delivery_enabled": True, "gst_number": ""}
+    allow_negative_stock = Column(Boolean, default=True, nullable=False) # In live kitchens, never block POS KOTs during rushes
     is_active = Column(Boolean, default=True, nullable=False)
 
     # Direct relational columns for pgAdmin & SQL queries

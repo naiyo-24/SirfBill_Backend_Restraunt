@@ -222,6 +222,90 @@ try:
         conn.execute(sa.text("ALTER TABLE restaurant_grn_items ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(255);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_items_grn ON restaurant_grn_items (grn_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_grn_items_ingredient ON restaurant_grn_items (ingredient_id);"))
+
+        # Stock Ledger Cost Snapshots & Immutability Trigger
+        conn.execute(sa.text("ALTER TABLE restaurant_stock_ledger ADD COLUMN IF NOT EXISTS unit_cost_at_time NUMERIC(12, 4) DEFAULT 0.0000;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_stock_ledger ADD COLUMN IF NOT EXISTS total_cost NUMERIC(12, 2) DEFAULT 0.00;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS allow_negative_stock BOOLEAN DEFAULT TRUE;"))
+
+        conn.execute(sa.text("""
+            CREATE OR REPLACE FUNCTION trg_prevent_stock_ledger_mutation()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                RAISE EXCEPTION 'restaurant_stock_ledger is append-only. Updates and deletions are strictly forbidden. Use REVERSAL transactions instead.';
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+        conn.execute(sa.text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_stock_ledger_immutable'
+                ) THEN
+                    CREATE TRIGGER trg_stock_ledger_immutable
+                    BEFORE UPDATE OR DELETE ON restaurant_stock_ledger
+                    FOR EACH ROW EXECUTE FUNCTION trg_prevent_stock_ledger_mutation();
+                END IF;
+            END $$;
+        """))
+
+        # Stock Transfer tables schema assurance
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_stock_transfers (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                tenant_id UUID NOT NULL,
+                transfer_number VARCHAR(50) NOT NULL,
+                transfer_type VARCHAR(30) NOT NULL DEFAULT 'INTER_BRANCH',
+                from_outlet_id UUID NOT NULL REFERENCES restaurant_outlets(id) ON DELETE CASCADE,
+                to_outlet_id UUID NOT NULL REFERENCES restaurant_outlets(id) ON DELETE CASCADE,
+                from_station VARCHAR(100),
+                to_station VARCHAR(100),
+                status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+                initiated_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                dispatched_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                received_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                dispatched_at TIMESTAMP WITHOUT TIME ZONE,
+                received_at TIMESTAMP WITHOUT TIME ZONE,
+                vehicle_number VARCHAR(50),
+                driver_name VARCHAR(100),
+                driver_phone VARCHAR(50),
+                total_items INTEGER NOT NULL DEFAULT 0,
+                total_valuation NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                notes TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_transfers_tenant_number ON restaurant_stock_transfers (tenant_id, transfer_number);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfers_status ON restaurant_stock_transfers (tenant_id, status);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfers_from_outlet ON restaurant_stock_transfers (from_outlet_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfers_to_outlet ON restaurant_stock_transfers (to_outlet_id);"))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_stock_transfer_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                transfer_id UUID NOT NULL REFERENCES restaurant_stock_transfers(id) ON DELETE CASCADE,
+                ingredient_id UUID NOT NULL REFERENCES restaurant_ingredients(id) ON DELETE RESTRICT,
+                destination_ingredient_id UUID REFERENCES restaurant_ingredients(id) ON DELETE SET NULL,
+                ingredient_name VARCHAR(150) NOT NULL,
+                sku VARCHAR(50),
+                unit VARCHAR(20) NOT NULL,
+                quantity_requested NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                quantity_dispatched NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                quantity_received NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                quantity_variance NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                unit_cost NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+                total_cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                variance_reason VARCHAR(255),
+                batch_number VARCHAR(100),
+                expiry_date TIMESTAMP WITHOUT TIME ZONE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_transfer ON restaurant_stock_transfer_items (transfer_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_ing ON restaurant_stock_transfer_items (ingredient_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_dest_ing ON restaurant_stock_transfer_items (destination_ingredient_id);"))
 except Exception as e:
     print(f"Schema startup migration note: {e}")
 
@@ -344,6 +428,7 @@ from routes.restaurant_tenders import router as restaurant_tenders_router
 from routes.restaurant_shifts import router as restaurant_shifts_router
 from routes.restaurant_reports import router as restaurant_reports_router
 from routes.restaurant_inventory import router as restaurant_inventory_router
+from routes.restaurant_stock_transfer import router as restaurant_stock_transfer_router
 from routes.restaurant_crm import router as restaurant_crm_router
 from routes.restaurant_procurement import router as restaurant_procurement_router
 
@@ -356,6 +441,7 @@ app.include_router(restaurant_tenders_router)
 app.include_router(restaurant_shifts_router)
 app.include_router(restaurant_reports_router)
 app.include_router(restaurant_inventory_router)
+app.include_router(restaurant_stock_transfer_router)
 app.include_router(restaurant_crm_router)
 app.include_router(restaurant_procurement_router)
 

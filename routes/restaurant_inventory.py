@@ -1,6 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 from decimal import Decimal
+from datetime import datetime, date
 import os
 import shutil
 import uuid
@@ -22,6 +23,7 @@ from schemas.restaurant_inventory import (
     RestaurantIngredientCategoryCreate, RestaurantIngredientCategoryUpdate, RestaurantIngredientCategoryResponse,
     RestaurantIngredientCreate, RestaurantIngredientUpdate, RestaurantIngredientResponse,
     StockAdjustmentCreate, StockLedgerResponse,
+    StockAuditBatchCreate, StockAuditBatchResponse, StockAuditItemResult,
     RecipeCreate, RecipeResponse
 )
 from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
@@ -430,6 +432,7 @@ def get_ingredients(
         res.code = ing.sku
         res.storage_location = ing.storage_location or ing.storage_zone
         res.storage_zone = ing.storage_zone or ing.storage_location
+        res.is_negative_stock = bool((ing.current_stock or Decimal("0.000")) < Decimal("0.000"))
         if ing.category:
             res.category_name = ing.category.name
             res.category_code = ing.category.code
@@ -796,34 +799,180 @@ def record_stock_adjustment(
     manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
     """
-    Append-only stock ledger adjustment. Modifies current stock balance atomically.
+    Append-only stock ledger adjustment. Modifies current stock balance atomically:
+    1. Acquires SELECT ... FOR UPDATE row-level lock on the ingredient.
+    2. Handles chef unit ergonomics (converts from PURCHASE UOM e.g. KG -> recipe GM if input_uom == 'PURCHASE').
+    3. Snapshots unit_cost_at_time and calculates total_cost for exact historical rupee audit.
+    4. Evaluates outlet negative stock policy.
     """
-    ingredient = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == payload.ingredient_id).first()
+    ingredient = db.query(RestaurantIngredient).filter(
+        RestaurantIngredient.id == payload.ingredient_id
+    ).with_for_update().first()
     if not ingredient:
         raise HTTPException(status_code=404, detail="Ingredient not found")
 
-    signed_qty = Decimal(str(payload.signed_quantity))
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == ingredient.outlet_id).first()
+    raw_qty = Decimal(str(payload.signed_quantity))
+
+    # Unit ergonomics: Determine whether chef entered in PURCHASE unit (KG, LTR) or RECIPE unit (GM, ML)
+    input_uom = (payload.input_uom or "RECIPE").strip().upper()
+    purch_uom = (ingredient.purchase_uom or "").strip().upper()
+    recipe_uom = (ingredient.recipe_uom or ingredient.unit or "").strip().upper()
+    conversion = Decimal(str(ingredient.uom_conversion_factor or 1.0))
+    if conversion <= Decimal("0.0000"):
+        conversion = Decimal("1.0000")
+
+    if input_uom in ("PURCHASE", purch_uom) and purch_uom != recipe_uom:
+        signed_qty = round(raw_qty * conversion, 3)
+        unit_label = f"{raw_qty} {purch_uom} ({signed_qty} {recipe_uom})"
+    else:
+        signed_qty = raw_qty
+        unit_label = f"{signed_qty} {recipe_uom}"
+
+    # Negative stock guard policy check
+    new_stock = (ingredient.current_stock or Decimal("0.000")) + signed_qty
+    if new_stock < Decimal("0.000") and outlet and not getattr(outlet, "allow_negative_stock", True):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Adjustment of {unit_label} would result in negative stock ({new_stock} {recipe_uom}). Negative stock is disabled for this outlet."
+        )
 
     actor_id = manager_user.id if manager_user else None
+    unit_cost = ingredient.cost_per_unit or Decimal("0.0000")
+    total_cost_val = round(abs(signed_qty) * unit_cost, 2)
 
     ledger_entry = RestaurantStockLedger(
         ingredient_id=ingredient.id,
         outlet_id=ingredient.outlet_id,
         tenant_id=ingredient.tenant_id,
         signed_quantity=signed_qty,
-        reason=payload.reason,
-        source_type="manual",
+        unit_cost_at_time=unit_cost,
+        total_cost=total_cost_val,
+        reason=payload.reason.strip().upper(),
+        source_type="manual_adjustment",
+        source_id=f"ADJ-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
         actor_id=actor_id,
-        notes=payload.notes
+        notes=f"{payload.notes or 'Manual adjustment'} [Entered: {unit_label}]"
     )
     db.add(ledger_entry)
 
     # Atomically adjust current cached balance
     ingredient.current_stock += signed_qty
+    ingredient.last_restocked_at = datetime.utcnow()
 
     db.commit()
     db.refresh(ledger_entry)
     return ledger_entry
+
+
+@router.post("/audits/submit", response_model=StockAuditBatchResponse, status_code=status.HTTP_201_CREATED)
+def submit_stock_audit(
+    payload: StockAuditBatchCreate,
+    db: Session = Depends(get_db),
+    manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Bulk Physical Stock Audit submission:
+    1. Validates all ingredients in the audit batch.
+    2. Locks ingredient rows using SELECT ... FOR UPDATE.
+    3. Converts physical counts to base recipe UOM.
+    4. Computes variance = physical_count - previous_stock.
+    5. Writes PHYSICAL_COUNT_ADJUSTMENT ledger entries sharing a single audit batch ID (AUDIT-YYYYMMDD-###).
+    6. Returns financial variance reconciliation summary in rupees.
+    """
+    outlet = resolve_outlet(db, payload.outlet_id)
+    audit_date = payload.audit_date or datetime.utcnow().date()
+    batch_code = f"AUDIT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+
+    results = []
+    items_adjusted = 0
+    total_surplus_rupees = Decimal("0.00")
+    total_deficit_rupees = Decimal("0.00")
+
+    for item_input in payload.items:
+        ing = db.query(RestaurantIngredient).filter(
+            RestaurantIngredient.id == item_input.ingredient_id,
+            RestaurantIngredient.outlet_id == outlet.id
+        ).with_for_update().first()
+
+        if not ing:
+            raise HTTPException(status_code=400, detail=f"Ingredient {item_input.ingredient_id} not found in this outlet")
+
+        conversion = Decimal(str(ing.uom_conversion_factor or 1.0))
+        if conversion <= Decimal("0.0000"):
+            conversion = Decimal("1.0000")
+
+        input_uom = (item_input.input_uom or "RECIPE").strip().upper()
+        purch_uom = (ing.purchase_uom or "").strip().upper()
+        recipe_uom = (ing.recipe_uom or ing.unit or "").strip().upper()
+
+        raw_count = Decimal(str(item_input.physical_count))
+        if input_uom in ("PURCHASE", purch_uom) and purch_uom != recipe_uom:
+            physical_count_recipe = round(raw_count * conversion, 3)
+        else:
+            physical_count_recipe = raw_count
+
+        prev_stock = ing.current_stock or Decimal("0.000")
+        variance = physical_count_recipe - prev_stock
+        unit_cost = ing.cost_per_unit or Decimal("0.0000")
+        variance_rupees = round(variance * unit_cost, 2)
+
+        if variance > Decimal("0.000"):
+            status_label = "SURPLUS"
+            total_surplus_rupees += variance_rupees
+        elif variance < Decimal("0.000"):
+            status_label = "DEFICIT"
+            total_deficit_rupees += abs(variance_rupees)
+        else:
+            status_label = "MATCHED"
+
+        # Only create ledger adjustment if there is physical variance
+        if variance != Decimal("0.000"):
+            items_adjusted += 1
+            ledger_entry = RestaurantStockLedger(
+                ingredient_id=ing.id,
+                outlet_id=outlet.id,
+                tenant_id=outlet.tenant_id,
+                signed_quantity=variance,
+                unit_cost_at_time=unit_cost,
+                total_cost=abs(variance_rupees),
+                reason="PHYSICAL_COUNT_ADJUSTMENT",
+                source_type="stock_audit",
+                source_id=batch_code,
+                actor_id=manager_user.id if manager_user else None,
+                notes=f"Audit {batch_code}: Counted {physical_count_recipe} {recipe_uom} vs System {prev_stock} {recipe_uom} (Variance: {variance:+} {recipe_uom})"
+            )
+            db.add(ledger_entry)
+            ing.current_stock = physical_count_recipe
+            ing.last_restocked_at = datetime.utcnow()
+
+        results.append(StockAuditItemResult(
+            ingredient_id=ing.id,
+            ingredient_name=ing.name,
+            recipe_uom=recipe_uom,
+            purchase_uom=purch_uom,
+            previous_stock=prev_stock,
+            physical_count=physical_count_recipe,
+            variance=variance,
+            variance_rupees=variance_rupees,
+            status=status_label
+        ))
+
+    db.commit()
+
+    net_variance_rupees = total_surplus_rupees - total_deficit_rupees
+
+    return StockAuditBatchResponse(
+        audit_batch_id=batch_code,
+        audit_date=audit_date,
+        outlet_id=outlet.id,
+        total_items_audited=len(payload.items),
+        items_adjusted=items_adjusted,
+        total_surplus_rupees=total_surplus_rupees,
+        total_deficit_rupees=total_deficit_rupees,
+        net_variance_rupees=net_variance_rupees,
+        results=results
+    )
 
 
 # ----------------- RECIPES / BOM -----------------

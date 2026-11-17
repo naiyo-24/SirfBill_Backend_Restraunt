@@ -973,7 +973,7 @@ def receive_goods(
         ingredient = db.query(RestaurantIngredient).filter(
             RestaurantIngredient.id == item_input.ingredient_id,
             RestaurantIngredient.outlet_id == outlet.id
-        ).first()
+        ).with_for_update().first()
         if not ingredient:
             raise HTTPException(status_code=400, detail=f"Ingredient {item_input.ingredient_id} not found")
 
@@ -1033,6 +1033,8 @@ def receive_goods(
                 outlet_id=outlet.id,
                 tenant_id=outlet.tenant_id,
                 signed_quantity=Decimal("0.000"), # 0 stock impact so SUM(signed_quantity) matches physical current_stock exactly
+                unit_cost_at_time=round(actual_price / conversion, 4),
+                total_cost=round(item_input.quantity_rejected * actual_price, 2),
                 reason="PURCHASE_REJECTED",
                 source_type="grn_dock_rejection",
                 source_id=grn_number,
@@ -1087,6 +1089,8 @@ def receive_goods(
                 outlet_id=outlet.id,
                 tenant_id=outlet.tenant_id,
                 signed_quantity=stock_received_qty, # Stored in Recipe UOM so SUM(signed_quantity) == current_stock
+                unit_cost_at_time=landed_cost_per_recipe_unit, # Cost snapshot at receipt time
+                total_cost=line_total, # Financial landed value
                 reason="PURCHASE_RECEIVED",
                 source_type="grn",
                 source_id=grn_number,
@@ -1096,16 +1100,17 @@ def receive_goods(
             db.add(ledger_entry)
 
             # 4. Weighted Average Cost (WAC) recalculation with landed cost (Price + non-creditable GST)
-            # In recipe units (e.g. ₹/G):
+            # Safe against negative stock (e.g., peak sales occurred before GRN was recorded)
             old_stock = ingredient.current_stock or Decimal("0.000")
             old_cost = ingredient.cost_per_unit or Decimal("0.0000")
 
-            total_stock_after = old_stock + stock_received_qty
-            if total_stock_after > Decimal("0.000") and old_stock > Decimal("0.000"):
+            if old_stock <= Decimal("0.000"):
+                # Reset WAC cleanly to the new landed cost so a negative denominator never distorts cost
+                ingredient.cost_per_unit = round(landed_cost_per_recipe_unit, 4)
+            else:
+                total_stock_after = old_stock + stock_received_qty
                 new_wac_recipe = ((old_stock * old_cost) + (stock_received_qty * landed_cost_per_recipe_unit)) / total_stock_after
                 ingredient.cost_per_unit = round(new_wac_recipe, 4)
-            elif total_stock_after > Decimal("0.000"):
-                ingredient.cost_per_unit = round(landed_cost_per_recipe_unit, 4)
 
             # Update purchase unit cost (e.g. ₹/KG = cost_per_unit * conversion)
             if hasattr(ingredient, "cost_per_purchase_unit"):
