@@ -315,6 +315,52 @@ try:
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_recipes_outlet ON restaurant_recipes (outlet_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_recipes_modifier ON restaurant_recipes (modifier_option_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_recipes_produced_ing ON restaurant_recipes (produced_ingredient_id);"))
+
+        # Physical Stock Audits schema assurance
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_stock_audits (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                batch_code VARCHAR(100) UNIQUE NOT NULL,
+                outlet_id UUID NOT NULL REFERENCES restaurant_outlets(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL,
+                auditor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                audit_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                audit_started_at TIMESTAMP WITHOUT TIME ZONE,
+                notes TEXT,
+                total_items_audited INTEGER NOT NULL DEFAULT 0,
+                items_adjusted INTEGER NOT NULL DEFAULT 0,
+                total_surplus_rupees NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                total_deficit_rupees NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                net_variance_rupees NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_audits_outlet ON restaurant_stock_audits (outlet_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_audits_batch ON restaurant_stock_audits (batch_code);"))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS restaurant_stock_audit_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                audit_id UUID NOT NULL REFERENCES restaurant_stock_audits(id) ON DELETE CASCADE,
+                ingredient_id UUID NOT NULL REFERENCES restaurant_ingredients(id) ON DELETE CASCADE,
+                ingredient_name VARCHAR(150),
+                recipe_uom VARCHAR(20) NOT NULL,
+                purchase_uom VARCHAR(20),
+                input_uom VARCHAR(20) DEFAULT 'RECIPE',
+                previous_stock NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                expected_stock NUMERIC(12, 3),
+                physical_count NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                raw_input_count NUMERIC(12, 3),
+                variance NUMERIC(12, 3) NOT NULL DEFAULT 0.000,
+                unit_cost_at_time NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+                variance_rupees NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                status VARCHAR(20) NOT NULL DEFAULT 'MATCHED',
+                notes TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_audit_items_audit ON restaurant_stock_audit_items (audit_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_audit_items_ing ON restaurant_stock_audit_items (ingredient_id);"))
 except Exception as e:
     print(f"Schema startup migration note: {e}")
 

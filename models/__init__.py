@@ -53,6 +53,7 @@ from .restaurant_procurement import (
 from .restaurant_recipe import RestaurantRecipe, RestaurantRecipeLine
 from .restaurant_stock_ledger import RestaurantStockLedger
 from .restaurant_stock_transfer import RestaurantStockTransfer, RestaurantStockTransferItem
+from .restaurant_stock_audit import RestaurantStockAudit, RestaurantStockAuditItem
 from .restaurant_customer import RestaurantCustomer, RestaurantLoyaltyLedger
 
 

@@ -496,12 +496,16 @@ def _deduct_order_line_stock(
                     consumption_qty = (norm_qty / yield_val) * Decimal(str(quantity))
                     ingredient.current_stock -= consumption_qty
 
+                    cost_u = ingredient.cost_per_unit or Decimal("0.0000")
+                    line_c = (consumption_qty * cost_u).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
                     ledger = RestaurantStockLedger(
                         ingredient_id=ingredient.id,
                         outlet_id=order.outlet_id,
                         tenant_id=order.tenant_id,
                         signed_quantity=-consumption_qty,
-                        unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                        unit_cost_at_time=cost_u,
+                        total_cost=line_c,
                         reason="ORDER_CONSUMPTION",
                         source_type="order",
                         source_id=str(order.id),
@@ -595,6 +599,7 @@ def _reverse_order_line_stock(
                     )
                     rev_qty = (norm_qty / yield_val) * Decimal(str(quantity_to_reverse))
 
+                    line_loss_cost = (rev_qty * (ingredient.cost_per_unit or Decimal("0.00"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     if not is_waste:
                         ingredient.current_stock += rev_qty
                         ledger = RestaurantStockLedger(
@@ -603,11 +608,12 @@ def _reverse_order_line_stock(
                             tenant_id=order.tenant_id,
                             signed_quantity=rev_qty, # Positive reversal back into stock
                             unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                            total_cost=line_loss_cost,
                             reason="REVERSAL",
                             source_type="order_void",
                             source_id=str(order.id),
                             actor_id=actor_id,
-                            notes=f"Stock reversal: {quantity_to_reverse}x {line.item_name} ({reason})"
+                            notes=f"Stock reversal: {quantity_to_reverse}x {line.item_name} ({reason}) [Qty: {rev_qty} {ingredient.recipe_uom}]"
                         )
                         db.add(ledger)
                     else:
@@ -617,11 +623,12 @@ def _reverse_order_line_stock(
                             tenant_id=order.tenant_id,
                             signed_quantity=Decimal("0.000"), # Already deducted, food wasted
                             unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                            total_cost=line_loss_cost, # Rupee loss explicitly preserved for waste analytics
                             reason="WASTAGE",
                             source_type="order_waste",
                             source_id=str(order.id),
                             actor_id=actor_id,
-                            notes=f"KOT item wasted: {quantity_to_reverse}x {line.item_name} ({reason})"
+                            notes=f"[CUSTOMER_RETURN] KOT item wasted: {quantity_to_reverse}x {line.item_name} ({reason}) [Qty: {rev_qty} {ingredient.recipe_uom}]"
                         )
                         db.add(ledger)
 
@@ -647,6 +654,7 @@ def _reverse_order_line_stock(
                                 ingredient.uom_conversion_factor
                             )
                             mod_rev = (norm_qty / m_yield) * Decimal(str(quantity_to_reverse))
+                            mod_loss_cost = (mod_rev * (ingredient.cost_per_unit or Decimal("0.00"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                             if not is_waste:
                                 ingredient.current_stock += mod_rev
@@ -656,11 +664,12 @@ def _reverse_order_line_stock(
                                     tenant_id=order.tenant_id,
                                     signed_quantity=mod_rev,
                                     unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                                    total_cost=mod_loss_cost,
                                     reason="REVERSAL",
                                     source_type="order_void",
                                     source_id=str(order.id),
                                     actor_id=actor_id,
-                                    notes=f"Stock reversal modifier: {quantity_to_reverse}x {mod.get('name', 'Modifier')} ({reason})"
+                                    notes=f"Stock reversal modifier: {quantity_to_reverse}x {mod.get('name', 'Modifier')} ({reason}) [Qty: {mod_rev} {ingredient.recipe_uom}]"
                                 )
                                 db.add(ledger)
                             else:
@@ -670,11 +679,12 @@ def _reverse_order_line_stock(
                                     tenant_id=order.tenant_id,
                                     signed_quantity=Decimal("0.000"),
                                     unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                                    total_cost=mod_loss_cost, # Rupee loss explicitly preserved
                                     reason="WASTAGE",
                                     source_type="order_waste",
                                     source_id=str(order.id),
                                     actor_id=actor_id,
-                                    notes=f"KOT modifier wasted: {quantity_to_reverse}x {mod.get('name', 'Modifier')} ({reason})"
+                                    notes=f"[CUSTOMER_RETURN] KOT modifier wasted: {quantity_to_reverse}x {mod.get('name', 'Modifier')} ({reason}) [Qty: {mod_rev} {ingredient.recipe_uom}]"
                                 )
                                 db.add(ledger)
             except (ValueError, TypeError):

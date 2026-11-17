@@ -121,6 +121,21 @@ class StockAdjustmentCreate(BaseModel):
     reason: str # PURCHASE_RECEIVED, WASTAGE, PHYSICAL_COUNT_ADJUSTMENT, SPOILAGE, BREAKAGE
     notes: Optional[str] = None
 
+class WasteLogCreate(BaseModel):
+    ingredient_id: UUID
+    quantity: Decimal = Field(..., gt=0, description="Positive quantity wasted or spoiled")
+    input_uom: Optional[str] = "RECIPE" # "PURCHASE" (e.g. KG) or "RECIPE" (e.g. G) or custom UOM
+    waste_reason: str = Field("SPOILAGE", description="SPOILAGE, EXPIRY, PREP_LOSS, BURNT_RUINED, DROPPED_SPILL, QUALITY_REJECT")
+    notes: Optional[str] = None
+
+class DishWasteLogCreate(BaseModel):
+    item_id: UUID
+    outlet_id: Optional[UUID] = None
+    variant_name: Optional[str] = "Standard"
+    portions: Decimal = Field(Decimal("1.00"), gt=0, description="Number of prepared plates/portions discarded")
+    waste_reason: str = Field("CUSTOMER_RETURN", description="CUSTOMER_RETURN, OVERCOOKED, DROPPED_SPILL, CANCELLED_AFTER_PREP")
+    notes: Optional[str] = None
+
 class StockLedgerResponse(BaseModel):
     id: UUID
     ingredient_id: UUID
@@ -148,11 +163,13 @@ class StockAuditItemInput(BaseModel):
     ingredient_id: UUID
     physical_count: Decimal # Count observed during physical count
     input_uom: Optional[str] = "RECIPE" # "RECIPE" or "PURCHASE"
+    expected_stock: Optional[Decimal] = None # System book stock snapshot when counting began
     notes: Optional[str] = None
 
 class StockAuditBatchCreate(BaseModel):
     outlet_id: Optional[UUID] = None
     audit_date: Optional[date] = None
+    audit_started_at: Optional[datetime] = None # When physical count sheet was opened
     notes: Optional[str] = None
     items: List[StockAuditItemInput]
 
@@ -162,21 +179,49 @@ class StockAuditItemResult(BaseModel):
     recipe_uom: str
     purchase_uom: str
     previous_stock: Decimal
+    expected_stock: Optional[Decimal] = None
     physical_count: Decimal
+    raw_input_count: Optional[Decimal] = None
     variance: Decimal # physical_count - previous_stock (in recipe unit)
     variance_rupees: Decimal # variance * unit_cost
     status: str # "MATCHED", "SURPLUS", "DEFICIT"
+    notes: Optional[str] = None
+
+    @field_serializer("previous_stock", "expected_stock", "physical_count", "raw_input_count", "variance", "variance_rupees", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
 
 class StockAuditBatchResponse(BaseModel):
     audit_batch_id: str
     audit_date: date
+    audit_started_at: Optional[datetime] = None
     outlet_id: UUID
     total_items_audited: int
     items_adjusted: int
     total_surplus_rupees: Decimal
     total_deficit_rupees: Decimal
     net_variance_rupees: Decimal
+    notes: Optional[str] = None
     results: List[StockAuditItemResult]
+
+    @field_serializer("total_surplus_rupees", "total_deficit_rupees", "net_variance_rupees", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+class StockAuditBatchSummary(BaseModel):
+    audit_batch_id: str
+    audit_date: date
+    created_at: datetime
+    outlet_id: UUID
+    auditor_name: Optional[str] = "Manager / Auditor"
+    items_adjusted: int
+    total_surplus_rupees: Decimal
+    total_deficit_rupees: Decimal
+    net_variance_rupees: Decimal
+
+    @field_serializer("total_surplus_rupees", "total_deficit_rupees", "net_variance_rupees", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
 
 
 # Recipe
@@ -211,6 +256,10 @@ class RecipeLineResponse(BaseModel):
     cost_per_unit: Optional[Decimal] = None
     line_cost: Optional[Decimal] = None
 
+    @field_serializer("quantity_required", "cost_per_unit", "line_cost", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
     model_config = ConfigDict(from_attributes=True)
 
 class RecipeResponse(BaseModel):
@@ -231,6 +280,10 @@ class RecipeResponse(BaseModel):
     instructions: Optional[str] = None
     lines: List[RecipeLineResponse] = []
 
+    @field_serializer("yield_servings", "selling_price", "plate_cost", "food_cost_percentage", "gross_margin_percentage", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
     model_config = ConfigDict(from_attributes=True)
 
 class RecipeLineCostBreakdown(BaseModel):
@@ -242,6 +295,10 @@ class RecipeLineCostBreakdown(BaseModel):
     cost_per_unit: Decimal
     line_cost: Decimal
     cost_contribution_pct: Decimal
+
+    @field_serializer("quantity_required", "portion_quantity", "cost_per_unit", "line_cost", "cost_contribution_pct", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
 
 class RecipeCostingResponse(BaseModel):
     recipe_id: UUID
@@ -255,4 +312,8 @@ class RecipeCostingResponse(BaseModel):
     gross_margin_percentage: Decimal
     cost_status: str # "IDEAL" (<=30%), "WARNING" (30-35%), "CRITICAL_SPIKE" (>35%)
     breakdown: List[RecipeLineCostBreakdown] = []
+
+    @field_serializer("yield_servings", "selling_price", "plate_cost", "food_cost_percentage", "gross_margin_percentage", check_fields=False)
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
 
