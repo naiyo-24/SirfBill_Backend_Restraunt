@@ -81,9 +81,18 @@ class RestaurantOrderStateTransition(BaseModel):
     status: Optional[str] = None # DRAFT, OPEN, SENT_TO_KITCHEN, COMPLETED, CANCELLED, VOIDED
     target_status: Optional[str] = None
     reason: Optional[str] = None
+    is_waste: Optional[bool] = False
+    disposition: Optional[str] = "RETURN_TO_STOCK" # "RETURN_TO_STOCK" (REVERSAL) or "WASTAGE"
     expected_version: Optional[int] = None
 
     model_config = ConfigDict(extra="allow")
+
+
+class RestaurantOrderItemVoid(BaseModel):
+    quantity: Optional[int] = Field(None, ge=1, description="Quantity to void. If omitted or >= line qty, voids entire line")
+    reason: str = Field(..., min_length=2, description="Reason for void (e.g. customer cancelled, wrong punch)")
+    is_waste: bool = Field(False, description="True if food was already cooked and wasted; False if raw ingredients are returned to stock")
+    expected_version: Optional[int] = Field(None, description="Optimistic locking version check")
 
 
 class RestaurantOrderResponse(BaseModel):

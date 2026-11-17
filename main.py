@@ -306,6 +306,15 @@ try:
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_transfer ON restaurant_stock_transfer_items (transfer_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_ing ON restaurant_stock_transfer_items (ingredient_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_dest_ing ON restaurant_stock_transfer_items (destination_ingredient_id);"))
+
+        # Restaurant Recipes (BOM) schema assurance
+        conn.execute(sa.text("ALTER TABLE restaurant_recipes ADD COLUMN IF NOT EXISTS outlet_id UUID REFERENCES restaurant_outlets(id) ON DELETE CASCADE;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_recipes ADD COLUMN IF NOT EXISTS modifier_option_id UUID REFERENCES restaurant_modifier_options(id) ON DELETE CASCADE;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_recipes ADD COLUMN IF NOT EXISTS produced_ingredient_id UUID REFERENCES restaurant_ingredients(id) ON DELETE SET NULL;"))
+        conn.execute(sa.text("ALTER TABLE restaurant_recipes ALTER COLUMN item_id DROP NOT NULL;"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_recipes_outlet ON restaurant_recipes (outlet_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_recipes_modifier ON restaurant_recipes (modifier_option_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_recipes_produced_ing ON restaurant_recipes (produced_ingredient_id);"))
 except Exception as e:
     print(f"Schema startup migration note: {e}")
 

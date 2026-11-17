@@ -45,6 +45,10 @@
       align-items: center;
       gap: 8px;
     }
+    .badge-subtext {
+      font-size: 11px;
+      opacity: 0.85;
+    }
     .bar-actions {
       display: flex;
       gap: 10px;
@@ -192,6 +196,11 @@
       line-height: 1.35;
       margin-bottom: 2px;
     }
+    .card-meta {
+      margin-top: 6px;
+      font-size: 10px;
+      color: #6B7280;
+    }
     .station-tag {
       display: inline-block;
       background: #E5E7EB;
@@ -262,6 +271,16 @@
     .text-right { text-align: right; }
     .bold { font-weight: 700; color: #111827; }
 
+    /* Column Widths */
+    .col-idx { width: 28px; }
+    .col-unit { width: 48px; }
+    .col-req { width: 72px; }
+    .col-disp { width: 76px; }
+    .col-recv { width: 76px; }
+    .col-var { width: 72px; }
+    .col-rate { width: 75px; }
+    .col-total { width: 90px; }
+
     .item-name {
       font-weight: 700;
       color: #111827;
@@ -270,12 +289,21 @@
       font-size: 9.5px;
       color: #6B7280;
     }
+    .text-received {
+      color: #059669;
+    }
     .pill-variance-loss {
       background: #FEE2E2;
       color: #DC2626;
       padding: 2px 5px;
       border-radius: 3px;
       font-weight: 700;
+      font-size: 9.5px;
+    }
+    .pill-variance-surplus {
+      color: #2563EB;
+      font-weight: 700;
+      padding: 2px 5px;
       font-size: 9.5px;
     }
     .pill-variance-zero {
@@ -318,6 +346,11 @@
       font-size: 9.5px;
       margin-bottom: 3px;
     }
+    .notes-legal {
+      margin-top: 6px;
+      font-size: 9.5px;
+      color: #9CA3AF;
+    }
 
     .summary-box {
       width: 290px;
@@ -332,6 +365,9 @@
       font-size: 11px;
       color: #4B5563;
       margin-bottom: 4px;
+    }
+    .text-loss {
+      color: #DC2626;
     }
     .summary-row.total-row {
       border-top: 1.5px solid #E5E7EB;
@@ -355,42 +391,52 @@
     .signatures-row {
       display: flex;
       justify-content: space-between;
-      margin-top: 36px;
+      align-items: flex-end;
+      margin-top: 40px;
       padding: 0 10px;
     }
     .sig-col {
-      width: 200px;
+      width: 220px;
       text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
     }
-    .sig-line {
-      border-bottom: 1px solid #9CA3AF;
-      margin-bottom: 5px;
-      height: 24px;
-    }
-    .sig-img-wrap {
-      height: 44px;
+    .sig-slot {
+      height: 55px;
       display: flex;
       align-items: flex-end;
       justify-content: center;
-      border-bottom: 1px solid #9CA3AF;
-      margin-bottom: 5px;
+      margin-bottom: 6px;
+      border-bottom: 1.5px solid #9CA3AF;
+      padding-bottom: 4px;
     }
     .drawn-sig-img {
-      max-height: 40px;
-      max-width: 170px;
+      max-height: 48px;
+      max-width: 180px;
       object-fit: contain;
+      display: block;
+      margin: 0 auto;
+    }
+    .sig-placeholder-line {
+      font-size: 10px;
+      color: #9CA3AF;
+      font-style: italic;
+      line-height: 20px;
     }
     .sig-label {
       font-size: 10px;
       font-weight: 700;
       color: #111827;
       text-transform: uppercase;
-      letter-spacing: 0.4px;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
     }
     .sig-name {
       font-size: 9.5px;
       color: #6B7280;
-      margin-top: 1px;
+      margin-top: 2px;
+      line-height: 1.3;
     }
 
     .footer-stamp {
@@ -417,18 +463,18 @@
     }
   </style>
 </head>
-<body>
+<body data-autoprint="{{ 'true' if autoprint else 'false' }}">
 
   <!-- Web View Action Bar (Hidden during Print) -->
   <div class="no-print-bar">
     <div class="bar-info">
       <span>📄 Stock Transfer Challan:</span>
       <strong>{{ transfer.transfer_number }}</strong>
-      <span style="font-size: 11px; opacity: 0.85;">[{{ transfer.status }}]</span>
+      <span class="badge-subtext">[{{ transfer.status }}]</span>
     </div>
     <div class="bar-actions">
-      <button class="btn btn-close" onclick="window.close(); if(!window.closed) window.history.back();">Close</button>
-      <button class="btn btn-print" onclick="window.print()">
+      <button type="button" class="btn btn-close" onclick="window.close(); if(!window.closed) window.history.back();">Close</button>
+      <button type="button" class="btn btn-print" onclick="window.print()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="6 9 6 2 18 2 18 9"></polyline>
           <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
@@ -484,7 +530,7 @@
         <div>
           <span class="station-tag">Station: {{ transfer.from_station or 'Central Cold Store' }}</span>
         </div>
-        <div class="card-text" style="margin-top: 6px; font-size: 10px; color: #6B7280;">
+        <div class="card-meta">
           Dispatched By: <strong>{{ dispatched_by_name or 'Storekeeper' }}</strong>
           {% if transfer.dispatched_at %} • {{ dispatched_at_formatted }}{% endif %}
         </div>
@@ -501,7 +547,7 @@
         <div>
           <span class="station-tag">Station: {{ transfer.to_station or 'Main Kitchen Line' }}</span>
         </div>
-        <div class="card-text" style="margin-top: 6px; font-size: 10px; color: #6B7280;">
+        <div class="card-meta">
           Received By: <strong>{{ received_by_name or 'Pending Verification' }}</strong>
           {% if transfer.received_at %} • {{ received_at_formatted }}{% endif %}
         </div>
@@ -533,15 +579,15 @@
       <table>
         <thead>
           <tr>
-            <th class="text-center" style="width: 28px;">#</th>
+            <th class="text-center col-idx">#</th>
             <th class="text-left">Item / Raw Material</th>
-            <th class="text-center" style="width: 48px;">Unit</th>
-            <th class="text-right" style="width: 72px;">Requested</th>
-            <th class="text-right" style="width: 76px;">Dispatched</th>
-            <th class="text-right" style="width: 76px;">Received</th>
-            <th class="text-center" style="width: 72px;">Variance</th>
-            <th class="text-right" style="width: 75px;">Unit Rate</th>
-            <th class="text-right" style="width: 90px;">Total (INR)</th>
+            <th class="text-center col-unit">Unit</th>
+            <th class="text-right col-req">Requested</th>
+            <th class="text-right col-disp">Dispatched</th>
+            <th class="text-right col-recv">Received</th>
+            <th class="text-center col-var">Variance</th>
+            <th class="text-right col-rate">Unit Rate</th>
+            <th class="text-right col-total">Total (INR)</th>
           </tr>
         </thead>
         <tbody>
@@ -561,12 +607,12 @@
             <td class="text-center">{{ it.unit }}</td>
             <td class="text-right">{{ "%.2f"|format(it.quantity_requested|float) }}</td>
             <td class="text-right bold">{{ "%.2f"|format(it.quantity_dispatched|float) }}</td>
-            <td class="text-right bold" style="color: #059669;">{{ "%.2f"|format(it.quantity_received|float) }}</td>
+            <td class="text-right bold text-received">{{ "%.2f"|format(it.quantity_received|float) }}</td>
             <td class="text-center">
-              {% if it.quantity_variance|float > 0 %}
+              {% if it.is_loss %}
                 <span class="pill-variance-loss">-{{ "%.2f"|format(it.quantity_variance|float) }}</span>
-              {% elif it.quantity_variance|float < 0 %}
-                <span style="color: #2563EB; font-weight: 700;">+{{ "%.2f"|format((it.quantity_variance|float)|abs) }}</span>
+              {% elif it.is_surplus %}
+                <span class="pill-variance-surplus">+{{ "%.2f"|format((it.quantity_variance|float)|abs) }}</span>
               {% else %}
                 <span class="pill-variance-zero">✓ 0.00</span>
               {% endif %}
@@ -585,7 +631,7 @@
       <strong>⚠️ Transit Shrinkage / Loss Acknowledged:</strong>
       Total loss of ₹{{ "%.2f"|format(total_variance_cost|float) }} recorded in stock ledger.
       {% for it in items %}
-        {% if it.quantity_variance|float > 0 and it.variance_reason %}
+        {% if it.is_loss and it.variance_reason %}
           <br>• {{ it.ingredient_name }}: short by {{ "%.2f"|format(it.quantity_variance|float) }} {{ it.unit }} (Reason: {{ it.variance_reason }})
         {% endif %}
       {% endfor %}
@@ -599,7 +645,7 @@
         <div>
           {{ transfer.notes or 'Commodities dispatched in sanitized food-grade containers. Maintain temperature cold-chain where applicable. Verify container seals and weigh immediately upon arrival.' }}
         </div>
-        <div style="margin-top: 6px; font-size: 9.5px; color: #9CA3AF;">
+        <div class="notes-legal">
           Governed under Section 143 / Rule 55 of CGST Rules (Delivery Challan for Transfer of Stock without Sale).
         </div>
       </div>
@@ -618,7 +664,7 @@
           <span>{{ "%.2f"|format(total_qty_received|float) }} Units</span>
         </div>
         {% if has_variance %}
-        <div class="summary-row" style="color: #DC2626;">
+        <div class="summary-row text-loss">
           <span>Transit Loss Value:</span>
           <span>-₹{{ "%.2f"|format(total_variance_cost|float) }}</span>
         </div>
@@ -633,29 +679,37 @@
     <!-- Tripartite Signatures -->
     <div class="signatures-row">
       <div class="sig-col">
-        {% if sender_signature %}
-          <div class="sig-img-wrap"><img src="{{ sender_signature }}" alt="Sender Sign" class="drawn-sig-img" /></div>
-        {% else %}
-          <div class="sig-line"></div>
-        {% endif %}
+        <div class="sig-slot">
+          {% if sender_signature %}
+            <img src="{{ sender_signature }}" alt="Sender Signature" class="drawn-sig-img">
+          {% else %}
+            <span class="sig-placeholder-line">Awaiting Storekeeper Sign</span>
+          {% endif %}
+        </div>
         <div class="sig-label">Dispatched By</div>
         <div class="sig-name">{{ dispatched_by_name or 'Storekeeper' }}</div>
       </div>
+
       <div class="sig-col">
-        {% if driver_signature %}
-          <div class="sig-img-wrap"><img src="{{ driver_signature }}" alt="Driver Sign" class="drawn-sig-img" /></div>
-        {% else %}
-          <div class="sig-line"></div>
-        {% endif %}
+        <div class="sig-slot">
+          {% if driver_signature %}
+            <img src="{{ driver_signature }}" alt="Driver Signature" class="drawn-sig-img">
+          {% else %}
+            <span class="sig-placeholder-line">Awaiting Driver Sign</span>
+          {% endif %}
+        </div>
         <div class="sig-label">Carrier / Transporter</div>
         <div class="sig-name">{{ transfer.driver_name or 'Driver Signature' }}</div>
       </div>
+
       <div class="sig-col">
-        {% if receiver_signature %}
-          <div class="sig-img-wrap"><img src="{{ receiver_signature }}" alt="Receiver Sign" class="drawn-sig-img" /></div>
-        {% else %}
-          <div class="sig-line"></div>
-        {% endif %}
+        <div class="sig-slot">
+          {% if receiver_signature %}
+            <img src="{{ receiver_signature }}" alt="Receiver Signature" class="drawn-sig-img">
+          {% else %}
+            <span class="sig-placeholder-line">Pending Verification</span>
+          {% endif %}
+        </div>
         <div class="sig-label">Received &amp; Verified By</div>
         <div class="sig-name">{{ received_by_name or 'Receiving Chef / Manager' }}</div>
       </div>
@@ -668,12 +722,15 @@
   </div>
 
   <script>
-    // Trigger browser print dialog if autoprint flag is passed
-    if (window.location.search.includes('autoprint=true') || {% if autoprint %}true{% else %}false{% endif %}) {
-      window.onload = function() {
-        window.print();
-      };
-    }
+    (function() {
+      const autoPrintParam = window.location.search.indexOf('autoprint=true') !== -1;
+      const autoPrintAttr = document.body.getAttribute('data-autoprint') === 'true';
+      if (autoPrintParam || autoPrintAttr) {
+        window.addEventListener('load', function() {
+          window.print();
+        });
+      }
+    })();
   </script>
 </body>
 </html>

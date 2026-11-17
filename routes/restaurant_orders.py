@@ -20,11 +20,12 @@ from models.restaurant_stock_ledger import RestaurantStockLedger
 from models.restaurant_tender import RestaurantTender
 from schemas.restaurant_order import (
     RestaurantOrderCreate, RestaurantOrderUpdateItems, RestaurantOrderStateTransition,
-    RestaurantOrderResponse, RestaurantOrderLineResponse
+    RestaurantOrderItemVoid, RestaurantOrderResponse, RestaurantOrderLineResponse
 )
 from schemas.restaurant_kitchen import KitchenTicketResponse
 from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
 from utils.restaurant_thermal_printer import generate_kot_pdf, generate_bill_pdf
+from utils.restaurant_inventory_helper import resolve_branch_ingredient, normalize_recipe_uom
 
 router = APIRouter(
     prefix="/api/restaurant/orders",
@@ -448,6 +449,238 @@ def apply_order_discount(
     return order
 
 
+def _deduct_order_line_stock(
+    db: Session,
+    order: RestaurantOrder,
+    line: RestaurantOrderLine,
+    quantity: int,
+    actor_id: Optional[UUID] = None
+):
+    """
+    Deducts inventory stock based on dish recipes and modifier add-ons.
+    Guards against:
+    1. Multi-branch ingredient resolution (resolves ingredient for order.outlet_id).
+    2. Modifiers / add-ons recipe deduction.
+    3. UOM mismatch protection (normalizes recipe line unit to ingredient.recipe_uom).
+    """
+    if quantity <= 0:
+        return
+
+    # 1. Base dish recipe deduction
+    if line.item_id:
+        recipe = (
+            db.query(RestaurantRecipe)
+            .filter(RestaurantRecipe.item_id == line.item_id, RestaurantRecipe.variant_name == line.variant_name)
+            .first()
+        )
+        if not recipe:
+            recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.item_id == line.item_id).first()
+
+        if recipe and recipe.lines:
+            yield_val = Decimal(str(recipe.yield_servings or 1.00))
+            if yield_val <= Decimal("0.00"):
+                yield_val = Decimal("1.00")
+
+            for r_line in recipe.lines:
+                base_ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == r_line.ingredient_id).first()
+                if base_ing:
+                    # Multi-branch ingredient resolution
+                    ingredient = resolve_branch_ingredient(db, base_ing, order.outlet_id)
+                    # UOM Normalization
+                    norm_qty, _ = normalize_recipe_uom(
+                        r_line.quantity_required,
+                        r_line.unit,
+                        ingredient.recipe_uom,
+                        ingredient.uom_conversion_factor
+                    )
+                    consumption_qty = (norm_qty / yield_val) * Decimal(str(quantity))
+                    ingredient.current_stock -= consumption_qty
+
+                    ledger = RestaurantStockLedger(
+                        ingredient_id=ingredient.id,
+                        outlet_id=order.outlet_id,
+                        tenant_id=order.tenant_id,
+                        signed_quantity=-consumption_qty,
+                        unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                        reason="ORDER_CONSUMPTION",
+                        source_type="order",
+                        source_id=str(order.id),
+                        actor_id=actor_id,
+                        notes=f"KOT consumption for {quantity}x {line.item_name} ({line.variant_name})"
+                    )
+                    db.add(ledger)
+
+    # 2. Modifiers / Add-ons deduction
+    for mod in (line.selected_modifiers or []):
+        mod_id = mod.get("id") or mod.get("modifier_option_id")
+        if mod_id:
+            try:
+                mod_uuid = UUID(str(mod_id))
+                mod_recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.modifier_option_id == mod_uuid).first()
+                if mod_recipe and mod_recipe.lines:
+                    m_yield = Decimal(str(mod_recipe.yield_servings or 1.00))
+                    if m_yield <= Decimal("0.00"):
+                        m_yield = Decimal("1.00")
+                    for mr_line in mod_recipe.lines:
+                        base_ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == mr_line.ingredient_id).first()
+                        if base_ing:
+                            ingredient = resolve_branch_ingredient(db, base_ing, order.outlet_id)
+                            norm_qty, _ = normalize_recipe_uom(
+                                mr_line.quantity_required,
+                                mr_line.unit,
+                                ingredient.recipe_uom,
+                                ingredient.uom_conversion_factor
+                            )
+                            mod_consumption = (norm_qty / m_yield) * Decimal(str(quantity))
+                            ingredient.current_stock -= mod_consumption
+
+                            ledger = RestaurantStockLedger(
+                                ingredient_id=ingredient.id,
+                                outlet_id=order.outlet_id,
+                                tenant_id=order.tenant_id,
+                                signed_quantity=-mod_consumption,
+                                unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                                reason="ORDER_CONSUMPTION",
+                                source_type="order",
+                                source_id=str(order.id),
+                                actor_id=actor_id,
+                                notes=f"KOT modifier consumption for {quantity}x {mod.get('name', 'Modifier')}"
+                            )
+                            db.add(ledger)
+            except (ValueError, TypeError):
+                pass
+
+
+def _reverse_order_line_stock(
+    db: Session,
+    order: RestaurantOrder,
+    line: RestaurantOrderLine,
+    quantity_to_reverse: int,
+    reason: str = "ORDER_VOID",
+    is_waste: bool = False,
+    actor_id: Optional[UUID] = None
+):
+    """
+    Reverses stock deduction for an order line that was already sent to kitchen.
+    If is_waste is True, food was already prepared and discarded (logged as WASTAGE without stock return).
+    If is_waste is False, stock is added back to current_stock with positive REVERSAL ledger entry.
+    """
+    if quantity_to_reverse <= 0:
+        return
+
+    # 1. Reverse Base Dish
+    if line.item_id:
+        recipe = (
+            db.query(RestaurantRecipe)
+            .filter(RestaurantRecipe.item_id == line.item_id, RestaurantRecipe.variant_name == line.variant_name)
+            .first()
+        )
+        if not recipe:
+            recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.item_id == line.item_id).first()
+
+        if recipe and recipe.lines:
+            yield_val = Decimal(str(recipe.yield_servings or 1.00))
+            if yield_val <= Decimal("0.00"):
+                yield_val = Decimal("1.00")
+
+            for r_line in recipe.lines:
+                base_ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == r_line.ingredient_id).first()
+                if base_ing:
+                    ingredient = resolve_branch_ingredient(db, base_ing, order.outlet_id)
+                    norm_qty, _ = normalize_recipe_uom(
+                        r_line.quantity_required,
+                        r_line.unit,
+                        ingredient.recipe_uom,
+                        ingredient.uom_conversion_factor
+                    )
+                    rev_qty = (norm_qty / yield_val) * Decimal(str(quantity_to_reverse))
+
+                    if not is_waste:
+                        ingredient.current_stock += rev_qty
+                        ledger = RestaurantStockLedger(
+                            ingredient_id=ingredient.id,
+                            outlet_id=order.outlet_id,
+                            tenant_id=order.tenant_id,
+                            signed_quantity=rev_qty, # Positive reversal back into stock
+                            unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                            reason="REVERSAL",
+                            source_type="order_void",
+                            source_id=str(order.id),
+                            actor_id=actor_id,
+                            notes=f"Stock reversal: {quantity_to_reverse}x {line.item_name} ({reason})"
+                        )
+                        db.add(ledger)
+                    else:
+                        ledger = RestaurantStockLedger(
+                            ingredient_id=ingredient.id,
+                            outlet_id=order.outlet_id,
+                            tenant_id=order.tenant_id,
+                            signed_quantity=Decimal("0.000"), # Already deducted, food wasted
+                            unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                            reason="WASTAGE",
+                            source_type="order_waste",
+                            source_id=str(order.id),
+                            actor_id=actor_id,
+                            notes=f"KOT item wasted: {quantity_to_reverse}x {line.item_name} ({reason})"
+                        )
+                        db.add(ledger)
+
+    # 2. Reverse Modifiers
+    for mod in (line.selected_modifiers or []):
+        mod_id = mod.get("id") or mod.get("modifier_option_id")
+        if mod_id:
+            try:
+                mod_uuid = UUID(str(mod_id))
+                mod_recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.modifier_option_id == mod_uuid).first()
+                if mod_recipe and mod_recipe.lines:
+                    m_yield = Decimal(str(mod_recipe.yield_servings or 1.00))
+                    if m_yield <= Decimal("0.00"):
+                        m_yield = Decimal("1.00")
+                    for mr_line in mod_recipe.lines:
+                        base_ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == mr_line.ingredient_id).first()
+                        if base_ing:
+                            ingredient = resolve_branch_ingredient(db, base_ing, order.outlet_id)
+                            norm_qty, _ = normalize_recipe_uom(
+                                mr_line.quantity_required,
+                                mr_line.unit,
+                                ingredient.recipe_uom,
+                                ingredient.uom_conversion_factor
+                            )
+                            mod_rev = (norm_qty / m_yield) * Decimal(str(quantity_to_reverse))
+
+                            if not is_waste:
+                                ingredient.current_stock += mod_rev
+                                ledger = RestaurantStockLedger(
+                                    ingredient_id=ingredient.id,
+                                    outlet_id=order.outlet_id,
+                                    tenant_id=order.tenant_id,
+                                    signed_quantity=mod_rev,
+                                    unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                                    reason="REVERSAL",
+                                    source_type="order_void",
+                                    source_id=str(order.id),
+                                    actor_id=actor_id,
+                                    notes=f"Stock reversal modifier: {quantity_to_reverse}x {mod.get('name', 'Modifier')} ({reason})"
+                                )
+                                db.add(ledger)
+                            else:
+                                ledger = RestaurantStockLedger(
+                                    ingredient_id=ingredient.id,
+                                    outlet_id=order.outlet_id,
+                                    tenant_id=order.tenant_id,
+                                    signed_quantity=Decimal("0.000"),
+                                    unit_cost_at_time=ingredient.cost_per_unit or Decimal("0.00"),
+                                    reason="WASTAGE",
+                                    source_type="order_waste",
+                                    source_id=str(order.id),
+                                    actor_id=actor_id,
+                                    notes=f"KOT modifier wasted: {quantity_to_reverse}x {mod.get('name', 'Modifier')} ({reason})"
+                                )
+                                db.add(ledger)
+            except (ValueError, TypeError):
+                pass
+
+
 @router.post("/{order_id}/send-to-kitchen", response_model=List[KitchenTicketResponse])
 def send_to_kitchen(
     order_id: str,
@@ -456,6 +689,7 @@ def send_to_kitchen(
 ):
     """
     Sends all pending order lines to station-based KOT tickets atomically.
+    Deducts ingredient inventory stock using dish BOM recipes and modifier add-ons.
     """
     parsed_uuid = None
     try:
@@ -463,23 +697,68 @@ def send_to_kitchen(
     except (ValueError, TypeError):
         pass
 
-    order = None
+    # 1. Re-firing / Idempotency Guard: Acquire row lock on order to serialize concurrent requests/retries
+    order_query = db.query(RestaurantOrder)
     if parsed_uuid:
-        order = db.query(RestaurantOrder).filter(RestaurantOrder.id == parsed_uuid).first()
-    if not order:
-        order = db.query(RestaurantOrder).filter(RestaurantOrder.order_number == str(order_id)).first()
+        order = order_query.filter(RestaurantOrder.id == parsed_uuid).with_for_update().first()
+    else:
+        order = order_query.filter(RestaurantOrder.order_number == str(order_id)).with_for_update().first()
 
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
+    # Only fetch lines that are currently PENDING_SEND
     pending_lines = (
         db.query(RestaurantOrderLine)
         .filter(RestaurantOrderLine.order_id == order.id)
         .filter(RestaurantOrderLine.kot_status == "PENDING_SEND")
+        .with_for_update()
         .all()
     )
     if not pending_lines:
         raise HTTPException(status_code=400, detail="No new items to send to kitchen")
+
+    # 2. Deadlock Prevention: Gather all target ingredient IDs across dishes & modifiers,
+    # and acquire row locks in deterministic ascending UUID order.
+    target_ingredient_ids = set()
+    for line in pending_lines:
+        if line.item_id:
+            recipe = (
+                db.query(RestaurantRecipe)
+                .filter(RestaurantRecipe.item_id == line.item_id, RestaurantRecipe.variant_name == line.variant_name)
+                .first()
+            )
+            if not recipe:
+                recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.item_id == line.item_id).first()
+            if recipe and recipe.lines:
+                for r_line in recipe.lines:
+                    base_ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == r_line.ingredient_id).first()
+                    if base_ing:
+                        resolved_ing = resolve_branch_ingredient(db, base_ing, order.outlet_id)
+                        target_ingredient_ids.add(resolved_ing.id)
+
+        for mod in (line.selected_modifiers or []):
+            mod_id = mod.get("id") or mod.get("modifier_option_id")
+            if mod_id:
+                try:
+                    mod_uuid = UUID(str(mod_id))
+                    mod_recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.modifier_option_id == mod_uuid).first()
+                    if mod_recipe and mod_recipe.lines:
+                        for mr_line in mod_recipe.lines:
+                            base_ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == mr_line.ingredient_id).first()
+                            if base_ing:
+                                resolved_ing = resolve_branch_ingredient(db, base_ing, order.outlet_id)
+                                target_ingredient_ids.add(resolved_ing.id)
+                except (ValueError, TypeError):
+                    pass
+
+    if target_ingredient_ids:
+        # Strictly sort ascending to guarantee deadlock-free locking across concurrent transactions
+        db.query(RestaurantIngredient)\
+            .filter(RestaurantIngredient.id.in_(target_ingredient_ids))\
+            .order_by(RestaurantIngredient.id)\
+            .with_for_update()\
+            .all()
 
     # Group lines by prep station (e.g. KITCHEN, BAR)
     stations_map = {}
@@ -530,28 +809,15 @@ def send_to_kitchen(
     order.status = "SENT_TO_KITCHEN"
     order.version += 1
 
-    # Deduct ingredient inventory stock based on recipes (BOM)
+    # Deduct ingredient inventory stock based on recipes (BOM) & modifiers
     for line in pending_lines:
-        if line.item_id:
-            recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.item_id == line.item_id).first()
-            if recipe and recipe.lines:
-                for r_line in recipe.lines:
-                    ingredient = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == r_line.ingredient_id).first()
-                    if ingredient:
-                        consumption_qty = (r_line.quantity_required / (recipe.yield_servings or Decimal("1.00"))) * Decimal(str(line.quantity))
-                        ingredient.current_stock -= consumption_qty
-                        ledger = RestaurantStockLedger(
-                            ingredient_id=ingredient.id,
-                            outlet_id=order.outlet_id,
-                            tenant_id=order.tenant_id,
-                            signed_quantity=-consumption_qty,
-                            reason="ORDER_CONSUMPTION",
-                            source_type="order",
-                            source_id=str(order.id),
-                            actor_id=current_user.id if current_user else None,
-                            notes=f"KOT consumption for {line.quantity}x {line.item_name}"
-                        )
-                        db.add(ledger)
+        _deduct_order_line_stock(
+            db=db,
+            order=order,
+            line=line,
+            quantity=line.quantity,
+            actor_id=current_user.id if current_user else None
+        )
 
     db.commit()
     table_name = "Takeaway"
@@ -638,6 +904,45 @@ def transition_order_status(
     order.status = new_status
     order.version += 1
 
+    # Reverse inventory stock for items already sent to kitchen (Point 2: Reversal vs Wastage)
+    if new_status in ["CANCELLED", "VOIDED"]:
+        is_waste = False
+        disposition = "RETURN_TO_STOCK"
+        if payload:
+            is_waste = getattr(payload, "is_waste", False) or False
+            disposition = (getattr(payload, "disposition", None) or "RETURN_TO_STOCK").upper()
+            if isinstance(payload, dict):
+                is_waste = payload.get("is_waste", False)
+                disposition = (payload.get("disposition") or "RETURN_TO_STOCK").upper()
+        if disposition == "WASTAGE":
+            is_waste = True
+
+        for line in (order.lines or []):
+            if line.kot_status in ["SENT_TO_KITCHEN", "PREPARING", "READY", "SERVED"] and line.quantity > 0:
+                _reverse_order_line_stock(
+                    db=db,
+                    order=order,
+                    line=line,
+                    quantity_to_reverse=line.quantity,
+                    reason=reason_val or f"Order {new_status}",
+                    is_waste=is_waste,
+                    actor_id=current_user.id if current_user else None
+                )
+            line.kot_status = "CANCELLED"
+
+    # Direct Counter / Takeaway Billing: If completing an order that had un-sent lines, deduct them now
+    if new_status == "COMPLETED":
+        pending_lines = [l for l in (order.lines or []) if l.kot_status == "PENDING_SEND" and l.quantity > 0]
+        for line in pending_lines:
+            _deduct_order_line_stock(
+                db=db,
+                order=order,
+                line=line,
+                quantity=line.quantity,
+                actor_id=current_user.id if current_user else None
+            )
+            line.kot_status = "SERVED"
+
     # Free up table if order finished or cancelled
     if new_status in ["COMPLETED", "CANCELLED", "VOIDED"] and order.table_id:
         table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
@@ -714,6 +1019,115 @@ def transition_order_status(
     }
 
 
+@router.post("/{order_id}/items/{line_id}/void", response_model=RestaurantOrderResponse)
+def void_order_item(
+    order_id: str,
+    line_id: UUID,
+    payload: RestaurantOrderItemVoid,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Void or cancel a specific item (or partial quantity) from an open order.
+    - If KOT was already sent to kitchen:
+      - is_waste = False: Restores raw ingredient inventory via positive REVERSAL stock ledger entries.
+      - is_waste = True: Logs a WASTAGE audit ledger entry (stock stays consumed because food was prepared).
+    - Recalculates order subtotal, tax amount, and grand total.
+    """
+    parsed_uuid = None
+    try:
+        parsed_uuid = UUID(str(order_id))
+    except (ValueError, TypeError):
+        pass
+
+    order_query = db.query(RestaurantOrder)
+    if parsed_uuid:
+        order = order_query.filter(RestaurantOrder.id == parsed_uuid).with_for_update().first()
+    else:
+        order = order_query.filter(RestaurantOrder.order_number == str(order_id)).with_for_update().first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status in ["COMPLETED", "CANCELLED", "VOIDED"]:
+        raise HTTPException(status_code=400, detail=f"Cannot void items on an order in {order.status} state")
+
+    if payload.expected_version is not None and payload.expected_version != -1:
+        if order.version != payload.expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Concurrency conflict: Order version is {order.version}, but client expected {payload.expected_version}."
+            )
+
+    line = db.query(RestaurantOrderLine).filter(
+        RestaurantOrderLine.id == line_id,
+        RestaurantOrderLine.order_id == order.id
+    ).with_for_update().first()
+    if not line:
+        raise HTTPException(status_code=404, detail="Order line not found")
+
+    if line.quantity <= 0 or line.kot_status == "CANCELLED":
+        raise HTTPException(status_code=400, detail="Line item is already voided or has 0 quantity")
+
+    void_qty = payload.quantity if (payload.quantity and payload.quantity < line.quantity) else line.quantity
+
+    # 1. Reverse stock ONLY if KOT was already sent to kitchen (Edge Case 3 Guard)
+    # If kot_status == "PENDING_SEND", the item was never fired to kitchen; ORDER_CONSUMPTION never ran.
+    # We do NOT run _reverse_order_line_stock to prevent artificially inflating stock.
+    if line.kot_status in ["SENT_TO_KITCHEN", "PREPARING", "READY", "SERVED"]:
+        _reverse_order_line_stock(
+            db=db,
+            order=order,
+            line=line,
+            quantity_to_reverse=void_qty,
+            reason=payload.reason,
+            is_waste=payload.is_waste,
+            actor_id=current_user.id if current_user else None
+        )
+
+    # 2. Update line item quantity or mark cancelled
+    remaining_qty = line.quantity - void_qty
+    if remaining_qty <= 0:
+        line.quantity = 0
+        line.kot_status = "CANCELLED"
+        line.tax_amount = Decimal("0.00")
+        line.line_total = Decimal("0.00")
+    else:
+        line.quantity = remaining_qty
+        base_sub = (line.unit_price + line.modifier_price) * Decimal(str(remaining_qty))
+        tax_amt = (base_sub * (line.tax_rate / Decimal("100"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        line.tax_amount = tax_amt
+        line.line_total = base_sub + tax_amt - line.discount_amount
+
+    # 3. Recalculate order totals from active lines
+    active_lines = [l for l in order.lines if l.quantity > 0 and l.kot_status != "CANCELLED"]
+    order.subtotal = sum((l.unit_price + l.modifier_price) * Decimal(str(l.quantity)) for l in active_lines)
+    order.tax_amount = sum(l.tax_amount for l in active_lines)
+    raw_total = order.subtotal - order.discount_amount + order.tax_amount
+    rounded = raw_total.quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
+    order.rounding_adjustment = rounded - raw_total
+    order.grand_total = rounded
+    order.version += 1
+
+    # 4. Audit event
+    audit = RestaurantAuditEvent(
+        outlet_id=order.outlet_id,
+        tenant_id=order.tenant_id,
+        actor_id=current_user.id if current_user else None,
+        action="ORDER_ITEM_VOID",
+        entity_name="order_line",
+        entity_id=str(line.id),
+        reason=payload.reason,
+        before_state={"item_name": line.item_name, "voided_qty": void_qty, "is_waste": payload.is_waste},
+        after_state={"remaining_qty": remaining_qty, "order_grand_total": float(order.grand_total)}
+    )
+    db.add(audit)
+
+    db.commit()
+    db.refresh(order)
+    return order
+
+
 @router.post("/{order_id}/settle")
 def settle_order(
     order_id: str,
@@ -759,6 +1173,18 @@ def settle_order(
         order.grand_total = max(Decimal("0.00"), order.grand_total - discount_amount)
     order.status = "COMPLETED"
     order.version += 1
+
+    # Direct Counter / Takeaway Billing: If completing an order with un-sent lines, deduct them now
+    pending_lines = [l for l in (order.lines or []) if l.kot_status == "PENDING_SEND" and l.quantity > 0]
+    for line in pending_lines:
+        _deduct_order_line_stock(
+            db=db,
+            order=order,
+            line=line,
+            quantity=line.quantity,
+            actor_id=current_user.id if current_user else None
+        )
+        line.kot_status = "SERVED"
 
     # Record settlement transaction in restaurant_tenders table
     tender = RestaurantTender(

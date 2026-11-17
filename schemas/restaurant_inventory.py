@@ -189,10 +189,14 @@ from schemas.restaurant_stock_transfer import (
 class RecipeLineInput(BaseModel):
     ingredient_id: UUID
     quantity_required: Decimal
-    unit: str
+    unit: Optional[str] = None # Auto-normalized to ingredient recipe_uom if None or different
 
 class RecipeCreate(BaseModel):
-    item_id: UUID
+    id: Optional[UUID] = None
+    item_id: Optional[UUID] = None
+    modifier_option_id: Optional[UUID] = None
+    outlet_id: Optional[UUID] = None
+    produced_ingredient_id: Optional[UUID] = None
     variant_name: str = "Standard"
     yield_servings: Decimal = Decimal("1.00")
     instructions: Optional[str] = None
@@ -201,17 +205,54 @@ class RecipeCreate(BaseModel):
 class RecipeLineResponse(BaseModel):
     id: UUID
     ingredient_id: UUID
+    ingredient_name: Optional[str] = None
     quantity_required: Decimal
     unit: str
+    cost_per_unit: Optional[Decimal] = None
+    line_cost: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class RecipeResponse(BaseModel):
     id: UUID
-    item_id: UUID
+    item_id: Optional[UUID] = None
+    item_name: Optional[str] = None
+    item_category: Optional[str] = None
+    modifier_option_id: Optional[UUID] = None
+    outlet_id: Optional[UUID] = None
+    produced_ingredient_id: Optional[UUID] = None
     variant_name: str
     yield_servings: Decimal
+    selling_price: Optional[Decimal] = None
+    plate_cost: Optional[Decimal] = None
+    food_cost_percentage: Optional[Decimal] = None
+    gross_margin_percentage: Optional[Decimal] = None
+    cost_status: Optional[str] = None
     instructions: Optional[str] = None
     lines: List[RecipeLineResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+class RecipeLineCostBreakdown(BaseModel):
+    ingredient_id: UUID
+    ingredient_name: str
+    quantity_required: Decimal
+    unit: str
+    portion_quantity: Decimal
+    cost_per_unit: Decimal
+    line_cost: Decimal
+    cost_contribution_pct: Decimal
+
+class RecipeCostingResponse(BaseModel):
+    recipe_id: UUID
+    item_id: Optional[UUID] = None
+    item_name: str
+    variant_name: str
+    yield_servings: Decimal
+    selling_price: Decimal
+    plate_cost: Decimal
+    food_cost_percentage: Decimal
+    gross_margin_percentage: Decimal
+    cost_status: str # "IDEAL" (<=30%), "WARNING" (30-35%), "CRITICAL_SPIKE" (>35%)
+    breakdown: List[RecipeLineCostBreakdown] = []
+

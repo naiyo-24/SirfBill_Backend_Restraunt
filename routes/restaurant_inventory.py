@@ -17,15 +17,19 @@ from models.database import get_db
 from models.user import User
 from models.restaurant_outlet import RestaurantOutlet
 from models.restaurant_ingredient import RestaurantIngredient, RestaurantIngredientCategory
+from models.restaurant_menu import RestaurantMenuItem, RestaurantMenuCategory, RestaurantItemPrice
 from models.restaurant_recipe import RestaurantRecipe, RestaurantRecipeLine
+from models.restaurant_modifier import RestaurantModifierOption
 from models.restaurant_stock_ledger import RestaurantStockLedger
+from models.restaurant_order import RestaurantOrder
 from schemas.restaurant_inventory import (
     RestaurantIngredientCategoryCreate, RestaurantIngredientCategoryUpdate, RestaurantIngredientCategoryResponse,
     RestaurantIngredientCreate, RestaurantIngredientUpdate, RestaurantIngredientResponse,
     StockAdjustmentCreate, StockLedgerResponse,
     StockAuditBatchCreate, StockAuditBatchResponse, StockAuditItemResult,
-    RecipeCreate, RecipeResponse
+    RecipeCreate, RecipeResponse, RecipeCostingResponse
 )
+from utils.restaurant_inventory_helper import normalize_recipe_uom, calculate_recipe_costing_data
 from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
 
 router = APIRouter(
@@ -977,6 +981,63 @@ def submit_stock_audit(
 
 # ----------------- RECIPES / BOM -----------------
 
+def _enrich_recipe_response(recipe: RestaurantRecipe, db: Session) -> RestaurantRecipe:
+    cost_data = calculate_recipe_costing_data(recipe, db)
+    setattr(recipe, "item_name", cost_data.get("item_name"))
+    setattr(recipe, "selling_price", cost_data.get("selling_price"))
+    setattr(recipe, "plate_cost", cost_data.get("plate_cost"))
+    setattr(recipe, "food_cost_percentage", cost_data.get("food_cost_percentage"))
+    setattr(recipe, "gross_margin_percentage", cost_data.get("gross_margin_percentage"))
+    setattr(recipe, "cost_status", cost_data.get("cost_status"))
+    if recipe.item_id:
+        menu_item = db.query(RestaurantMenuItem).filter(RestaurantMenuItem.id == recipe.item_id).first()
+        if menu_item:
+            category_name = None
+            if hasattr(menu_item, "category") and menu_item.category:
+                category_name = getattr(menu_item.category, "name", None)
+            setattr(recipe, "item_category", category_name or "Menu Dish")
+    for l in (recipe.lines or []):
+        ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == l.ingredient_id).first()
+        if ing:
+            setattr(l, "ingredient_name", ing.name)
+            setattr(l, "cost_per_unit", ing.cost_per_unit)
+            portion_qty = (l.quantity_required / (recipe.yield_servings or Decimal("1.00")))
+            setattr(l, "line_cost", (portion_qty * (ing.cost_per_unit or Decimal("0.00"))).quantize(Decimal("0.01")))
+    return recipe
+
+
+@router.get("/recipes", response_model=List[RecipeResponse])
+def get_all_recipes(
+    outlet_id: Optional[UUID] = None,
+    item_id: Optional[UUID] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    List all Bill of Materials (BOM) recipes with real-time plate costs, food cost %, and margins.
+    """
+    query = db.query(RestaurantRecipe).options(joinedload(RestaurantRecipe.lines))
+    if outlet_id:
+        query = query.filter((RestaurantRecipe.outlet_id == outlet_id) | (RestaurantRecipe.outlet_id == None))
+    if item_id:
+        query = query.filter(RestaurantRecipe.item_id == item_id)
+    
+    recipes = query.all()
+    enriched = []
+    for r in recipes:
+        _enrich_recipe_response(r, db)
+        if search and search.strip():
+            s = search.strip().lower()
+            name_match = (getattr(r, "item_name", "") or "").lower()
+            cat_match = (getattr(r, "item_category", "") or "").lower()
+            var_match = (r.variant_name or "").lower()
+            if s not in name_match and s not in cat_match and s not in var_match:
+                continue
+        enriched.append(r)
+    return enriched
+
+
 @router.post("/recipes", response_model=RecipeResponse, status_code=status.HTTP_201_CREATED)
 def create_recipe(
     payload: RecipeCreate,
@@ -984,29 +1045,94 @@ def create_recipe(
     manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
     """
-    Define Bill of Materials (BOM) linking menu dish/variant to required ingredients.
+    Define or update Bill of Materials (BOM) linking a menu dish, modifier add-on, or batch prep to required ingredients.
+    Includes automated UOM mismatch protection (normalizes KG/LTR/etc to ingredient recipe_uom).
     """
-    recipe = RestaurantRecipe(
-        item_id=payload.item_id,
-        variant_name=payload.variant_name,
-        yield_servings=payload.yield_servings,
-        instructions=payload.instructions
-    )
-    db.add(recipe)
-    db.flush()
+    if not payload.item_id and not payload.modifier_option_id and not payload.produced_ingredient_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Recipe must be linked to at least one target: 'item_id', 'modifier_option_id', or 'produced_ingredient_id'."
+        )
+
+    # Check for existing recipe to update (upsert pattern)
+    recipe = None
+    if payload.id:
+        recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.id == payload.id).first()
+    elif payload.item_id:
+        recipe = (
+            db.query(RestaurantRecipe)
+            .filter(
+                RestaurantRecipe.item_id == payload.item_id,
+                RestaurantRecipe.variant_name == (payload.variant_name or "Standard"),
+                (RestaurantRecipe.outlet_id == payload.outlet_id) | (RestaurantRecipe.outlet_id == None)
+            )
+            .first()
+        )
+
+    if recipe:
+        recipe.variant_name = payload.variant_name or "Standard"
+        recipe.yield_servings = payload.yield_servings or Decimal("1.00")
+        recipe.instructions = payload.instructions
+        if payload.outlet_id:
+            recipe.outlet_id = payload.outlet_id
+        # Remove existing lines and replace
+        db.query(RestaurantRecipeLine).filter(RestaurantRecipeLine.recipe_id == recipe.id).delete()
+    else:
+        recipe = RestaurantRecipe(
+            item_id=payload.item_id,
+            modifier_option_id=payload.modifier_option_id,
+            produced_ingredient_id=payload.produced_ingredient_id,
+            outlet_id=payload.outlet_id,
+            variant_name=payload.variant_name or "Standard",
+            yield_servings=payload.yield_servings or Decimal("1.00"),
+            instructions=payload.instructions
+        )
+        db.add(recipe)
+        db.flush()
 
     for line in payload.lines:
+        ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == line.ingredient_id).first()
+        if not ing:
+            raise HTTPException(status_code=400, detail=f"Ingredient ID {line.ingredient_id} not found.")
+
+        # UOM Mismatch Protection: Normalize to ingredient's recipe UOM
+        target_uom = ing.recipe_uom or ing.unit or "G"
+        norm_qty, norm_uom = normalize_recipe_uom(
+            quantity=line.quantity_required,
+            from_unit=line.unit,
+            target_uom=target_uom,
+            conversion_factor=ing.uom_conversion_factor
+        )
+
         r_line = RestaurantRecipeLine(
             recipe_id=recipe.id,
             ingredient_id=line.ingredient_id,
-            quantity_required=line.quantity_required,
-            unit=line.unit.upper()
+            quantity_required=norm_qty,
+            unit=norm_uom
         )
         db.add(r_line)
 
     db.commit()
     db.refresh(recipe)
-    return recipe
+
+    return _enrich_recipe_response(recipe, db)
+
+
+@router.delete("/recipes/{recipe_id}", status_code=status.HTTP_200_OK)
+def delete_recipe(
+    recipe_id: UUID,
+    db: Session = Depends(get_db),
+    manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Delete a Recipe Bill of Materials (BOM).
+    """
+    recipe = db.query(RestaurantRecipe).filter(RestaurantRecipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found.")
+    db.delete(recipe)
+    db.commit()
+    return {"message": "Recipe deleted successfully.", "recipe_id": str(recipe_id)}
 
 
 @router.get("/recipes/{item_id}", response_model=List[RecipeResponse])
@@ -1015,10 +1141,221 @@ def get_item_recipes(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    return (
+    recipes = (
         db.query(RestaurantRecipe)
         .options(joinedload(RestaurantRecipe.lines))
         .filter(RestaurantRecipe.item_id == item_id)
         .all()
     )
+    for r in recipes:
+        for l in (r.lines or []):
+            ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == l.ingredient_id).first()
+            if ing:
+                setattr(l, "ingredient_name", ing.name)
+                setattr(l, "cost_per_unit", ing.cost_per_unit)
+                portion_qty = (l.quantity_required / (r.yield_servings or Decimal("1.00")))
+                setattr(l, "line_cost", (portion_qty * (ing.cost_per_unit or Decimal("0.00"))).quantize(Decimal("0.01")))
+    return recipes
+
+
+@router.get("/recipes/modifier/{modifier_option_id}", response_model=List[RecipeResponse])
+def get_modifier_recipes(
+    modifier_option_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Get recipes linked to an add-on modifier option (e.g. Extra Cheese Slice).
+    """
+    recipes = (
+        db.query(RestaurantRecipe)
+        .options(joinedload(RestaurantRecipe.lines))
+        .filter(RestaurantRecipe.modifier_option_id == modifier_option_id)
+        .all()
+    )
+    for r in recipes:
+        for l in (r.lines or []):
+            ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == l.ingredient_id).first()
+            if ing:
+                setattr(l, "ingredient_name", ing.name)
+                setattr(l, "cost_per_unit", ing.cost_per_unit)
+                portion_qty = (l.quantity_required / (r.yield_servings or Decimal("1.00")))
+                setattr(l, "line_cost", (portion_qty * (ing.cost_per_unit or Decimal("0.00"))).quantize(Decimal("0.01")))
+    return recipes
+
+
+@router.get("/recipes/{item_id}/costing", response_model=List[RecipeCostingResponse])
+def get_item_recipe_costing(
+    item_id: UUID,
+    selling_price: Optional[Decimal] = Query(None, description="Optional selling price override to test profit margins"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Real-time Food Cost % and Plate Cost calculation using Moving Weighted Average Cost (WAC).
+    Flags dishes whose food cost exceeds 30-35% threshold:
+    - 'IDEAL': <= 30%
+    - 'WARNING': 30% - 35%
+    - 'CRITICAL_SPIKE': > 35%
+    """
+    recipes = (
+        db.query(RestaurantRecipe)
+        .options(joinedload(RestaurantRecipe.lines))
+        .filter(RestaurantRecipe.item_id == item_id)
+        .all()
+    )
+    if not recipes:
+        raise HTTPException(status_code=404, detail="No recipe found for this menu item.")
+
+    costing_list = []
+    for r in recipes:
+        cost_data = calculate_recipe_costing_data(r, db, selling_price_override=selling_price)
+        costing_list.append(RecipeCostingResponse(**cost_data))
+
+    return costing_list
+
+
+# ----------------- STOCK CONSUMPTION STREAM -----------------
+
+@router.get("/consumption")
+def get_stock_consumption_stream(
+    outlet_id: Optional[UUID] = None,
+    reason: Optional[str] = None, # ORDER_CONSUMPTION, REVERSAL, WASTAGE
+    search: Optional[str] = None,
+    limit: int = 150,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Live stream of automatic stock deductions triggered by POS KOT dispatches, voids, and wastage.
+    Includes Moving Weighted Average Cost (WAC) valuation snapshots.
+    """
+    query = (
+        db.query(RestaurantStockLedger)
+        .options(joinedload(RestaurantStockLedger.ingredient))
+    )
+    if outlet_id:
+        query = query.filter(RestaurantStockLedger.outlet_id == outlet_id)
+    
+    if reason and reason.strip():
+        query = query.filter(RestaurantStockLedger.reason == reason.strip().upper())
+    else:
+        query = query.filter(RestaurantStockLedger.reason.in_(["ORDER_CONSUMPTION", "REVERSAL", "WASTAGE"]))
+
+    records = (
+        query.order_by(RestaurantStockLedger.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    # Cache orders for fast lookup
+    order_ids = {r.source_id for r in records if r.source_id and r.source_type == "order"}
+    orders_map = {}
+    if order_ids:
+        valid_uuids = []
+        for oid in order_ids:
+            try:
+                valid_uuids.append(UUID(oid))
+            except (ValueError, TypeError):
+                pass
+        if valid_uuids:
+            orders = db.query(RestaurantOrder).filter(RestaurantOrder.id.in_(valid_uuids)).all()
+            for o in orders:
+                orders_map[str(o.id)] = o
+
+    raw_items = []
+    total_consumption_inr = Decimal("0.00")
+    total_reversal_inr = Decimal("0.00")
+    total_wastage_inr = Decimal("0.00")
+
+    for r in records:
+        cost_val = Decimal(str(r.total_cost or 0.00))
+        if r.reason == "ORDER_CONSUMPTION":
+            total_consumption_inr += cost_val
+        elif r.reason == "REVERSAL":
+            total_reversal_inr += cost_val
+        elif r.reason == "WASTAGE":
+            total_wastage_inr += cost_val
+
+        order_obj = orders_map.get(str(r.source_id)) if r.source_id else None
+        order_num = order_obj.order_number if order_obj else (f"ORD-{str(r.source_id)[:6]}" if r.source_id else "KOT-ORDER")
+
+        # Parse dish name and portions from notes if available
+        # notes format: "KOT consumption for 2x Chicken Biryani (Standard)"
+        dish_name = "Dish Consumption"
+        portions = 1
+        if r.notes:
+            m = re.search(r"for\s+(\d+)x\s+([^:]+)", r.notes)
+            if m:
+                portions = int(m.group(1))
+                dish_name = m.group(2).strip()
+            else:
+                dish_name = r.notes
+
+        ing_name = r.ingredient.name if r.ingredient else "Ingredient"
+        uom = r.ingredient.recipe_uom or r.ingredient.unit or "G" if r.ingredient else "G"
+        qty_consumed = abs(float(r.signed_quantity))
+
+        item_data = {
+            "id": str(r.id),
+            "order_id": str(r.source_id or ""),
+            "order_number": order_num,
+            "dish_name": dish_name,
+            "portions": portions,
+            "ingredient_id": str(r.ingredient_id),
+            "ingredient_name": ing_name,
+            "quantity_consumed": qty_consumed,
+            "signed_quantity": float(r.signed_quantity),
+            "unit": uom,
+            "unit_cost": float(r.unit_cost_at_time or 0.0),
+            "total_cost": float(r.total_cost or 0.0),
+            "reason": r.reason,
+            "notes": r.notes or "",
+            "timestamp": r.created_at.isoformat()
+        }
+
+        if search and search.strip():
+            s = search.strip().lower()
+            if (s not in dish_name.lower() and
+                s not in order_num.lower() and
+                s not in ing_name.lower() and
+                s not in (r.source_id or "").lower()):
+                continue
+
+        raw_items.append(item_data)
+
+    # Group into order-level deduction events
+    grouped_events = {}
+    for it in raw_items:
+        key = f"{it['order_id']}_{it['dish_name']}_{it['timestamp'][:16]}"
+        if key not in grouped_events:
+            grouped_events[key] = {
+                "id": it["id"],
+                "order_id": it["order_number"],
+                "raw_order_id": it["order_id"],
+                "dish_name": it["dish_name"],
+                "portions_prepared": it["portions"],
+                "timestamp": it["timestamp"],
+                "reason": it["reason"],
+                "total_batch_cost": 0.0,
+                "deductions": []
+            }
+        g = grouped_events[key]
+        g["total_batch_cost"] += it["total_cost"]
+        deduction_str = f"{it['ingredient_name']} ({it['quantity_consumed']:.1f} {it['unit']} - ₹{it['total_cost']:.2f})"
+        g["deductions"].append(deduction_str)
+
+    events_list = list(grouped_events.values())
+
+    return {
+        "status": "ACTIVE",
+        "total_records": len(raw_items),
+        "summary": {
+            "total_consumption_inr": float(total_consumption_inr),
+            "total_reversals_inr": float(total_reversal_inr),
+            "total_wastage_inr": float(total_wastage_inr),
+        },
+        "events": events_list,
+        "ledger_stream": raw_items
+    }
 
