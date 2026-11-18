@@ -65,39 +65,39 @@ async def create_shop(
     weekly_close_val = extra.get("weekly_closing") or extra.get("operating_settings", {}).get("weekly_closing", "None (Open 7 Days)")
     desc_val = extra.get("description") or ""
 
-    # 1. Generate clean module login credentials for this outlet matching the Flutter UI
+    # 1. Generate clean, distinct module login credentials for this outlet matching the Flutter UI
     safe_code = (request.code or "outlet").lower().replace("-", "").replace(" ", "")
-    default_pass = "123456"
+    custom_accs = extra.get("module_accounts") or {}
 
-    module_accounts = extra.get("module_accounts") or {
+    module_accounts = {
         "pos": {
-            "name": f"{request.name} POS Cashier",
-            "username": f"{safe_code}_pos",
-            "password": default_pass,
+            "name": custom_accs.get("pos", {}).get("name") or f"{request.name} POS Cashier",
+            "username": custom_accs.get("pos", {}).get("username") or f"{safe_code}_pos",
+            "password": custom_accs.get("pos", {}).get("password") or f"{safe_code}_pos@123",
             "role": "CASHIER"
         },
         "kitchen": {
-            "name": f"{request.name} Kitchen Display",
-            "username": f"{safe_code}_kds",
-            "password": default_pass,
+            "name": custom_accs.get("kitchen", {}).get("name") or f"{request.name} Kitchen Display",
+            "username": custom_accs.get("kitchen", {}).get("username") or f"{safe_code}_kds",
+            "password": custom_accs.get("kitchen", {}).get("password") or f"{safe_code}_kds@123",
             "role": "KITCHEN"
         },
         "inventory": {
-            "name": f"{request.name} Inventory & Purchase",
-            "username": f"{safe_code}_inv",
-            "password": default_pass,
+            "name": custom_accs.get("inventory", {}).get("name") or f"{request.name} Inventory & Purchase",
+            "username": custom_accs.get("inventory", {}).get("username") or f"{safe_code}_inv",
+            "password": custom_accs.get("inventory", {}).get("password") or f"{safe_code}_inv@123",
             "role": "MANAGER"
         },
         "crm": {
-            "name": f"{request.name} CRM & Reports",
-            "username": f"{safe_code}_crm",
-            "password": default_pass,
+            "name": custom_accs.get("crm", {}).get("name") or f"{request.name} CRM & Reports",
+            "username": custom_accs.get("crm", {}).get("username") or f"{safe_code}_crm",
+            "password": custom_accs.get("crm", {}).get("password") or f"{safe_code}_crm@123",
             "role": "MANAGER"
         },
         "waiter": {
-            "name": f"{request.name} Waiter / Captain",
-            "username": f"{safe_code}_waiter",
-            "password": default_pass,
+            "name": custom_accs.get("waiter", {}).get("name") or f"{request.name} Waiter / Captain",
+            "username": custom_accs.get("waiter", {}).get("username") or f"{safe_code}_waiter",
+            "password": custom_accs.get("waiter", {}).get("password") or f"{safe_code}_waiter@123",
             "role": "WAITER"
         }
     }
@@ -278,7 +278,16 @@ async def get_shops(
             extra["bank_branch"] = o.bank_branch or extra.get("bank_branch") or extra.get("branch_name")
             extra["bank_account_name"] = o.bank_account_name or extra.get("bank_account_name") or extra.get("ac_holder_name")
             extra["account_holder_name"] = extra["bank_account_name"]
-            if "module_accounts" in svc:
+            if "module_accounts" in svc and isinstance(svc["module_accounts"], dict):
+                mod_accounts = dict(svc["module_accounts"])
+                # Live sync with User table to ensure each module displays its exact unique password
+                for mod_k, mod_v in mod_accounts.items():
+                    if isinstance(mod_v, dict) and mod_v.get("username"):
+                        u_rec = db.query(User).filter(User.email == mod_v["username"]).first()
+                        if u_rec and u_rec.password:
+                            mod_v["password"] = u_rec.password
+                extra["module_accounts"] = mod_accounts
+            elif "module_accounts" in svc:
                 extra["module_accounts"] = svc["module_accounts"]
 
             results.append(ShopResponse(
