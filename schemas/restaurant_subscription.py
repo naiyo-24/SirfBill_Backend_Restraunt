@@ -9,10 +9,17 @@ class SubscriptionPlanResponse(BaseModel):
     plan_code: str
     name: str
     description: Optional[str] = None
-    price: Decimal
-    currency: str
+    price: Decimal # Base price from database (GST excluded)
+    base_price: Optional[Decimal] = None # Explicit Base price
+    gst_rate: float = 18.0 # Standard 18% GST rate
+    gst_amount: Optional[Decimal] = None # Calculated 18% GST
+    total_price: Optional[Decimal] = None # Base + 18% GST
+    currency: str = "INR"
     billing_cycle: str
     duration_days: int
+    gst_note: str = "GST (18%) Excluded"
+    price_display: Optional[str] = None # e.g. "₹299 (GST Excluded)"
+    total_display: Optional[str] = None # e.g. "₹353 (Incl. 18% GST)"
     features: List[str] = []
     is_active: bool
     is_popular: bool
@@ -20,6 +27,18 @@ class SubscriptionPlanResponse(BaseModel):
 
     @field_serializer("price", check_fields=False)
     def serialize_price(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("base_price", check_fields=False)
+    def serialize_base_price(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("gst_amount", check_fields=False)
+    def serialize_gst_amount(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("total_price", check_fields=False)
+    def serialize_total_price(self, v: Optional[Decimal]) -> Optional[float]:
         return float(v) if v is not None else None
 
     model_config = ConfigDict(from_attributes=True)
@@ -69,8 +88,10 @@ class RazorpayOrderCreate(BaseModel):
 
 class RazorpayOrderResponse(BaseModel):
     order_id: Optional[str] = None
-    amount: Decimal
+    amount: Decimal # Total payable (including 18% GST)
     amount_paise: int
+    base_price: Optional[Decimal] = None # Base price (GST excluded)
+    gst_amount: Optional[Decimal] = None # 18% GST
     currency: str
     key_id: str
     plan_id: UUID
@@ -82,6 +103,14 @@ class RazorpayOrderResponse(BaseModel):
 
     @field_serializer("amount", check_fields=False)
     def serialize_amount(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("base_price", check_fields=False)
+    def serialize_base_price(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("gst_amount", check_fields=False)
+    def serialize_gst_amount(self, v: Optional[Decimal]) -> Optional[float]:
         return float(v) if v is not None else None
 
 
@@ -130,7 +159,10 @@ class SubscriptionStatusResponse(BaseModel):
     is_active: bool
     status: str # ACTIVE, TRIAL, EXPIRED, NONE
     plan_name: Optional[str] = None
-    price: Optional[Decimal] = None
+    price: Optional[Decimal] = None # Base price
+    base_price: Optional[Decimal] = None
+    gst_note: str = "GST (18%) Excluded"
+    total_price: Optional[Decimal] = None
     billing_cycle: Optional[str] = None
     expires_at: Optional[datetime] = None
     days_remaining: int
@@ -143,6 +175,14 @@ class SubscriptionStatusResponse(BaseModel):
 
     @field_serializer("price", check_fields=False)
     def serialize_price(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("base_price", check_fields=False)
+    def serialize_base_price(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("total_price", check_fields=False)
+    def serialize_total_price(self, v: Optional[Decimal]) -> Optional[float]:
         return float(v) if v is not None else None
 
     model_config = ConfigDict(from_attributes=True)

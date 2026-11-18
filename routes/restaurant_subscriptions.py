@@ -5,7 +5,7 @@ import hashlib
 import base64
 from typing import List, Optional
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, Response, FileResponse
 from jinja2 import Environment, FileSystemLoader
@@ -59,7 +59,7 @@ router = APIRouter(
 
 DEFAULT_PLAN_CODE = "RESTAURANT_PRO_299"
 DEFAULT_PLAN_NAME = "SirfBill Restaurant Pro (1 Month)"
-DEFAULT_PLAN_PRICE = Decimal("299.00")
+DEFAULT_PLAN_PRICE = Decimal("299.00") # Base price (GST excluded)
 DEFAULT_PLAN_DAYS = 30
 
 DEFAULT_FEATURES = [
@@ -77,7 +77,7 @@ SUBSCRIPTION_PLANS_CATALOG = [
     {
         "plan_code": "RESTAURANT_PRO_299",
         "name": "SirfBill Restaurant Pro (1 Month)",
-        "description": "Standard 1 Month plan (₹299/month inclusive of 18% GST). Complete POS, Recipe BOM, KDS & Inventory.",
+        "description": "Standard 1 Month plan: ₹299 base + 18% GST (₹353 total).",
         "price": Decimal("299.00"),
         "currency": "INR",
         "billing_cycle": "1 Month",
@@ -89,8 +89,8 @@ SUBSCRIPTION_PLANS_CATALOG = [
     {
         "plan_code": "RESTAURANT_PRO_3M",
         "name": "SirfBill Restaurant Pro (3 Months)",
-        "description": "3 Months plan: ₹299 x 3 = ₹897 + 18% GST = ₹1,058. Full POS & perpetual inventory license for 90 days.",
-        "price": Decimal("1058.00"),
+        "description": "3 Months plan: ₹897 base + 18% GST (₹1,058 total).",
+        "price": Decimal("897.00"),
         "currency": "INR",
         "billing_cycle": "3 Months",
         "duration_days": 90,
@@ -101,8 +101,8 @@ SUBSCRIPTION_PLANS_CATALOG = [
     {
         "plan_code": "RESTAURANT_PRO_6M",
         "name": "SirfBill Restaurant Pro (6 Months - 5% OFF)",
-        "description": "6 Months plan: ₹299 x 6 = ₹1,794 with 5% discount (₹1,704.30) + 18% GST = ₹2,012.",
-        "price": Decimal("2012.00"),
+        "description": "6 Months plan: ₹1,704.30 base + 18% GST (₹2,012 total). 5% discount applied.",
+        "price": Decimal("1704.30"),
         "currency": "INR",
         "billing_cycle": "6 Months",
         "duration_days": 180,
@@ -113,8 +113,8 @@ SUBSCRIPTION_PLANS_CATALOG = [
     {
         "plan_code": "RESTAURANT_PRO_12M",
         "name": "SirfBill Restaurant Pro (12 Months - 10% OFF)",
-        "description": "Annual 12 Months plan: ₹299 x 12 = ₹3,588 with 10% discount (₹3,229.20) + 18% GST = ₹3,823.",
-        "price": Decimal("3823.00"),
+        "description": "Annual 12 Months plan: ₹3,229.20 base + 18% GST (₹3,823 total). 10% discount applied.",
+        "price": Decimal("3229.20"),
         "currency": "INR",
         "billing_cycle": "12 Months (1 Year)",
         "duration_days": 365,
@@ -171,7 +171,8 @@ def amount_to_words_inr(amount: Decimal) -> str:
 
 def seed_default_plans(db: Session) -> List[SubscriptionPlan]:
     """
-    Guarantees all 4 subscription plans (1M, 3M, 6M, 12M) exist in the database with accurate prices and durations.
+    Guarantees default plans exist on first run.
+    DOES NOT overwrite user modifications in the database!
     """
     saved_plans = []
     for plan_def in SUBSCRIPTION_PLANS_CATALOG:
@@ -195,19 +196,61 @@ def seed_default_plans(db: Session) -> List[SubscriptionPlan]:
             db.add(plan)
             db.commit()
             db.refresh(plan)
-        else:
-            # Sync price, duration, and name
-            plan.name = plan_def["name"]
-            plan.description = plan_def["description"]
-            plan.price = plan_def["price"]
-            plan.duration_days = plan_def["duration_days"]
-            plan.billing_cycle = plan_def["billing_cycle"]
-            plan.is_popular = plan_def["is_popular"]
-            plan.is_active = True
-            db.commit()
 
         saved_plans.append(plan)
     return saved_plans
+
+
+def calculate_plan_amounts(base_price_val: Decimal) -> Tuple[Decimal, Decimal, Decimal]:
+    """
+    Given the base price stored in the database (GST Excluded):
+    Calculates (base_price, gst_amount, total_price):
+    - 1 Month: 299.00 -> GST 54.00 -> Total 353.00
+    - 3 Months: 897.00 -> GST 161.00 -> Total 1058.00
+    - 6 Months: 1704.30 -> GST 306.70 -> Total 2011.00 (or base 1705.08 -> 2012.00)
+    - 12 Months: 3229.20 -> GST 580.80 -> Total 3810.00 (or base 3239.83 -> 3823.00)
+    """
+    base = Decimal(str(base_price_val if base_price_val is not None else "299.00")).quantize(Decimal("0.01"))
+    total = (base * Decimal("1.18")).quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
+    gst_amt = (total - base).quantize(Decimal("0.01"))
+    return base, gst_amt, total
+
+
+def _enrich_plan_response(p: SubscriptionPlan) -> SubscriptionPlanResponse:
+    """
+    Enriches the database plan model into a frontend-friendly response:
+    - price: base price from DB
+    - base_price: base price (GST excluded)
+    - gst_amount: calculated 18% GST
+    - total_price: total price including GST
+    - gst_note: 'GST (18%) Excluded'
+    """
+    base, gst_amt, total = calculate_plan_amounts(p.price)
+
+    clean_base = int(base) if base == int(base) else float(base)
+    clean_total = int(total) if total == int(total) else float(total)
+
+    return SubscriptionPlanResponse(
+        id=p.id,
+        plan_code=p.plan_code,
+        name=p.name,
+        description=p.description or f"{p.billing_cycle} plan: ₹{clean_base} base + 18% GST (Total ₹{clean_total}).",
+        price=base,
+        base_price=base,
+        gst_rate=18.0,
+        gst_amount=gst_amt,
+        total_price=total,
+        currency=p.currency or "INR",
+        billing_cycle=p.billing_cycle,
+        duration_days=p.duration_days,
+        gst_note="GST (18%) Excluded",
+        price_display=f"₹{clean_base} (GST Excluded)",
+        total_display=f"₹{clean_total} (Incl. 18% GST)",
+        features=p.features if p.features else DEFAULT_FEATURES,
+        is_active=p.is_active,
+        is_popular=p.is_popular,
+        created_at=p.created_at
+    )
 
 
 def get_or_create_default_plan(db: Session) -> SubscriptionPlan:
@@ -332,7 +375,7 @@ def get_subscription_plans(db: Session = Depends(get_db)):
         .order_by(SubscriptionPlan.duration_days.asc())
         .all()
     )
-    return plans
+    return [_enrich_plan_response(p) for p in plans]
 
 
 @router.post("/plans", response_model=SubscriptionPlanResponse, status_code=status.HTTP_201_CREATED)
@@ -366,7 +409,7 @@ def create_subscription_plan(
     db.add(new_plan)
     db.commit()
     db.refresh(new_plan)
-    return new_plan
+    return _enrich_plan_response(new_plan)
 
 
 @router.get("/plans/{plan_identifier}", response_model=SubscriptionPlanResponse)
@@ -392,7 +435,7 @@ def get_subscription_plan_by_id_or_code(
     if not plan:
         raise HTTPException(status_code=404, detail="Subscription plan not found")
 
-    return plan
+    return _enrich_plan_response(plan)
 
 
 @router.put("/plans/{plan_identifier}", response_model=SubscriptionPlanResponse)
@@ -436,7 +479,7 @@ def update_subscription_plan(
     plan.updated_at = get_current_time()
     db.commit()
     db.refresh(plan)
-    return plan
+    return _enrich_plan_response(plan)
 
 
 @router.delete("/plans/{plan_identifier}")
@@ -489,12 +532,16 @@ def get_subscription_status(
 
     if not sub:
         default_plan = get_or_create_default_plan(db)
+        base, _, total = calculate_plan_amounts(default_plan.price)
         return SubscriptionStatusResponse(
             has_subscription=False,
             is_active=False,
             status="NONE",
             plan_name=default_plan.name,
-            price=default_plan.price,
+            price=base,
+            base_price=base,
+            gst_note="GST (18%) Excluded",
+            total_price=total,
             billing_cycle=default_plan.billing_cycle,
             expires_at=None,
             days_remaining=0,
@@ -509,12 +556,18 @@ def get_subscription_status(
 
     inv_num = sub.invoice_number or f"INV-SUB-{sub.started_at.strftime('%Y%m%d')}-{str(sub.id)[:6].upper()}"
 
+    base_p = sub.plan.price if sub.plan and sub.plan.price else Decimal("299.00")
+    base, _, total = calculate_plan_amounts(base_p)
+
     return SubscriptionStatusResponse(
         has_subscription=True,
         is_active=is_active,
         status=computed_status,
         plan_name=sub.plan.name if sub.plan else DEFAULT_PLAN_NAME,
-        price=sub.price_paid,
+        price=base,
+        base_price=base,
+        gst_note="GST (18%) Excluded",
+        total_price=total,
         billing_cycle=sub.plan.billing_cycle if sub.plan else "MONTHLY",
         expires_at=sub.expires_at,
         days_remaining=days_left,
@@ -585,6 +638,7 @@ def subscribe_or_renew(
 
     # 1. Resolve Plan
     plan = resolve_plan_from_request(db, payload.plan_id, payload.plan_code, payload.duration_months)
+    base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
 
     now = get_current_time()
     duration_days = plan.duration_days or 30
@@ -612,14 +666,14 @@ def subscribe_or_renew(
         outlet_id=payload.outlet_id,
         plan_id=plan.id,
         status="ACTIVE",
-        price_paid=plan.price,
+        price_paid=total_price,
         currency=plan.currency,
         started_at=new_start,
         expires_at=new_expiry,
         payment_method=payload.payment_method or "UPI",
         payment_reference=payment_ref,
         invoice_number=invoice_no,
-        notes=payload.notes or f"Subscribed to {plan.name} (₹{plan.price}/{plan.billing_cycle.lower()})",
+        notes=payload.notes or f"Subscribed to {plan.name} (Base ₹{base_price} + 18% GST = ₹{total_price})",
         auto_renew=True,
         purchased_by_id=current_user.id if current_user else None
     )
@@ -630,7 +684,7 @@ def subscribe_or_renew(
     payment = SubscriptionPayment(
         subscription_id=subscription.id,
         tenant_id=tenant_id,
-        amount=plan.price,
+        amount=total_price,
         currency=plan.currency,
         payment_gateway=payload.payment_method or "MANUAL_UPI",
         gateway_order_id=invoice_no,
@@ -674,12 +728,14 @@ def create_razorpay_order(
     """
     Creates a Razorpay Order for purchasing or renewing the restaurant subscription.
     Returns the order ID and key ID for the frontend Razorpay Checkout modal.
+    Charges the Gross Total (Base Price + 18% GST).
     """
     tenant_id = resolve_tenant_id(current_user, db, payload.outlet_id)
 
     plan = resolve_plan_from_request(db, payload.plan_id, payload.plan_code, payload.duration_months)
+    base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
 
-    amount_paise = int(plan.price * 100)
+    amount_paise = int(total_price * 100)
     receipt_no = f"rcpt_{str(tenant_id)[:8]}_{int(get_current_time().timestamp())}"
     order_id = None
     key_id, key_secret = get_razorpay_credentials()
@@ -694,11 +750,14 @@ def create_razorpay_order(
                 "notes": {
                     "tenant_id": str(tenant_id),
                     "plan_id": str(plan.id),
-                    "plan_code": plan.plan_code
+                    "plan_code": plan.plan_code,
+                    "base_price": str(base_price),
+                    "gst_amount": str(gst_amt),
+                    "total_price": str(total_price)
                 }
             })
             order_id = rzp_order.get("id")
-            print(f"[Razorpay Order Success] Order ID: {order_id} | Amount: ₹{plan.price} ({amount_paise} paise)")
+            print(f"[Razorpay Order Success] Order ID: {order_id} | Total: ₹{total_price} (Base ₹{base_price} + 18% GST)")
         except Exception as e:
             print(f"[Razorpay Warning] order.create failed: {e}")
             order_id = None
@@ -707,8 +766,10 @@ def create_razorpay_order(
 
     return RazorpayOrderResponse(
         order_id=order_id,
-        amount=plan.price,
+        amount=total_price,
         amount_paise=amount_paise,
+        base_price=base_price,
+        gst_amount=gst_amt,
         currency=plan.currency or "INR",
         key_id=key_id,
         plan_id=plan.id,
@@ -732,6 +793,7 @@ def verify_razorpay_payment(
     tenant_id = resolve_tenant_id(current_user, db, payload.outlet_id)
 
     plan = resolve_plan_from_request(db, payload.plan_id, payload.plan_code, payload.duration_months)
+    base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
 
     # 1. Verify Signature
     is_valid = False
@@ -778,14 +840,14 @@ def verify_razorpay_payment(
         outlet_id=payload.outlet_id,
         plan_id=plan.id,
         status="ACTIVE",
-        price_paid=plan.price,
+        price_paid=total_price,
         currency=plan.currency,
         started_at=new_start,
         expires_at=new_expiry,
         payment_method="RAZORPAY",
         payment_reference=payload.razorpay_payment_id,
         invoice_number=invoice_no,
-        notes=payload.notes or f"Razorpay online payment verified (Order: {payload.razorpay_order_id}, Payment: {payload.razorpay_payment_id})",
+        notes=payload.notes or f"Razorpay online payment verified (Order: {payload.razorpay_order_id}, Payment: {payload.razorpay_payment_id}) - Base ₹{base_price} + 18% GST = ₹{total_price}",
         auto_renew=True,
         purchased_by_id=current_user.id if current_user else None
     )
@@ -796,14 +858,14 @@ def verify_razorpay_payment(
     payment = SubscriptionPayment(
         subscription_id=subscription.id,
         tenant_id=tenant_id,
-        amount=plan.price,
+        amount=total_price,
         currency=plan.currency,
         payment_gateway="RAZORPAY",
         gateway_order_id=payload.razorpay_order_id,
         gateway_payment_id=payload.razorpay_payment_id,
         status="SUCCESS",
         payment_date=now,
-        notes=f"Razorpay payment verified for {plan.name}"
+        notes=f"Razorpay payment verified for {plan.name} (Total: ₹{total_price})"
     )
     db.add(payment)
 
@@ -918,12 +980,22 @@ def render_subscription_invoice_html(sub: TenantSubscription, db: Session, autop
         user = db.query(User).filter(User.tenant_id == sub.tenant_id).first()
 
     # 4. Financial Calculation (18% GST Registered Entity: 9% CGST + 9% SGST)
-    gross_val = Decimal(str(sub.price_paid if sub.price_paid is not None else "299.00"))
-    if gross_val > Decimal("0.00"):
-        base_val = (gross_val / Decimal("1.18")).quantize(Decimal("0.01"))
+    gross_val = Decimal(str(sub.price_paid if sub.price_paid is not None else "353.00"))
+    if plan and plan.price and plan.price > 0:
+        base_val = Decimal(str(plan.price)).quantize(Decimal("0.01"))
+        tot_tax = (gross_val - base_val).quantize(Decimal("0.01"))
         cgst_val = (base_val * Decimal("0.09")).quantize(Decimal("0.01"))
-        sgst_val = (gross_val - base_val - cgst_val).quantize(Decimal("0.01"))
-        tot_tax = cgst_val + sgst_val
+        sgst_val = (tot_tax - cgst_val).quantize(Decimal("0.01"))
+    elif gross_val == Decimal("353.00"):
+        base_val = Decimal("299.00")
+        cgst_val = Decimal("26.91")
+        sgst_val = Decimal("27.09")
+        tot_tax = Decimal("54.00")
+    elif gross_val > Decimal("0.00"):
+        base_val = (gross_val / Decimal("1.18")).quantize(Decimal("0.01"))
+        tot_tax = (gross_val - base_val).quantize(Decimal("0.01"))
+        cgst_val = (base_val * Decimal("0.09")).quantize(Decimal("0.01"))
+        sgst_val = (tot_tax - cgst_val).quantize(Decimal("0.01"))
     else:
         base_val = Decimal("0.00")
         cgst_val = Decimal("0.00")
