@@ -738,6 +738,7 @@ def create_razorpay_order(
     amount_paise = int(total_price * 100)
     receipt_no = f"rcpt_{str(tenant_id)[:8]}_{int(get_current_time().timestamp())}"
     order_id = None
+    payment_link_url = None
     key_id, key_secret = get_razorpay_credentials()
 
     if razorpay and key_id and key_secret:
@@ -758,6 +759,28 @@ def create_razorpay_order(
             })
             order_id = rzp_order.get("id")
             print(f"[Razorpay Order Success] Order ID: {order_id} | Total: ₹{total_price} (Base ₹{base_price} + 18% GST)")
+
+            # Create official hosted Razorpay payment link (hosted on rzp.io, bypasses localhost website check)
+            try:
+                plink_payload = {
+                    "amount": amount_paise,
+                    "currency": plan.currency or "INR",
+                    "description": f"{plan.name} ({plan.billing_cycle})",
+                    "notes": {
+                        "tenant_id": str(tenant_id),
+                        "plan_id": str(plan.id),
+                        "plan_code": plan.plan_code,
+                        "order_id": str(order_id)
+                    }
+                }
+                if payload.callback_url:
+                    plink_payload["callback_url"] = payload.callback_url
+                    plink_payload["callback_method"] = "get"
+                plink = client.payment_link.create(plink_payload)
+                payment_link_url = plink.get("short_url")
+            except Exception as pl_err:
+                print(f"[Razorpay PaymentLink Note] {pl_err}")
+                payment_link_url = None
         except Exception as e:
             print(f"[Razorpay Warning] order.create failed: {e}")
             order_id = None
@@ -777,7 +800,8 @@ def create_razorpay_order(
         plan_code=plan.plan_code,
         duration_days=plan.duration_days,
         billing_cycle=plan.billing_cycle,
-        outlet_id=payload.outlet_id
+        outlet_id=payload.outlet_id,
+        payment_link_url=payment_link_url
     )
 
 
@@ -795,10 +819,20 @@ def verify_razorpay_payment(
     plan = resolve_plan_from_request(db, payload.plan_id, payload.plan_code, payload.duration_months)
     base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
 
-    # 1. Verify Signature
+    # 1. Verify Signature or Direct Razorpay API Fetch
     is_valid = False
     key_id, key_secret = get_razorpay_credentials()
-    if key_secret and payload.razorpay_order_id and payload.razorpay_signature and not payload.razorpay_order_id.startswith("order_test_"):
+    if razorpay and key_id and key_secret and payload.razorpay_payment_id:
+        try:
+            client = razorpay.Client(auth=(key_id, key_secret))
+            p_info = client.payment.fetch(payload.razorpay_payment_id)
+            if p_info.get("status") in ("captured", "authorized"):
+                is_valid = True
+                print(f"[Razorpay API Verified] Payment {payload.razorpay_payment_id} status: {p_info.get('status')}")
+        except Exception as f_err:
+            print(f"[Razorpay API Fetch Note] {f_err}")
+
+    if not is_valid and key_secret and payload.razorpay_order_id and payload.razorpay_signature and not payload.razorpay_order_id.startswith("order_test_"):
         try:
             expected_sig = hmac.new(
                 key_secret.encode("utf-8"),
@@ -808,8 +842,7 @@ def verify_razorpay_payment(
             is_valid = hmac.compare_digest(expected_sig, payload.razorpay_signature)
         except Exception:
             is_valid = False
-    else:
-        # In simulated checkout, accept valid format
+    elif not is_valid:
         is_valid = bool(payload.razorpay_payment_id)
 
     if not is_valid:
@@ -884,6 +917,112 @@ def verify_razorpay_payment(
             print(f"[PDF Storage Note] {e}")
 
     return _enrich_subscription_response(subscription)
+
+
+@router.get("/check-order/{order_id}")
+def check_order_status(
+    order_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Checks if a Razorpay order has been paid and auto-activates the subscription if paid.
+    Perfect for desktop apps and background polling.
+    """
+    key_id, key_secret = get_razorpay_credentials()
+    if not (razorpay and key_id and key_secret):
+        return {"paid": False, "status": "UNKNOWN"}
+
+    try:
+        client = razorpay.Client(auth=(key_id, key_secret))
+        rzp_order = client.order.fetch(order_id)
+        status_val = rzp_order.get("status")
+
+        if status_val == "paid":
+            existing_pmt = db.query(SubscriptionPayment).filter(
+                SubscriptionPayment.gateway_order_id == order_id
+            ).first()
+            if existing_pmt:
+                sub = db.query(TenantSubscription).filter(
+                    TenantSubscription.id == existing_pmt.subscription_id
+                ).first()
+                return {"paid": True, "status": "PAID", "payment_id": existing_pmt.gateway_payment_id, "subscription": _enrich_subscription_response(sub) if sub else None}
+
+            payments = client.order.payments(order_id)
+            successful_pmt = None
+            for p in payments.get("items", []):
+                if p.get("status") == "captured":
+                    successful_pmt = p
+                    break
+
+            if successful_pmt:
+                notes = rzp_order.get("notes", {})
+                tenant_id = uuid.UUID(notes.get("tenant_id")) if notes.get("tenant_id") else uuid.UUID("9f3670ca-438f-4251-984c-8fc230826a1b")
+                plan_code = notes.get("plan_code", DEFAULT_PLAN_CODE)
+                plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.plan_code == plan_code).first() or get_or_create_default_plan(db)
+                base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
+
+                now = get_current_time()
+                duration_days = plan.duration_days or 30
+                existing_sub = db.query(TenantSubscription).filter(
+                    TenantSubscription.tenant_id == tenant_id
+                ).order_by(TenantSubscription.expires_at.desc()).first()
+
+                if existing_sub and existing_sub.expires_at > now and existing_sub.status in ("ACTIVE", "TRIAL"):
+                    new_start = existing_sub.started_at
+                    new_expiry = existing_sub.expires_at + timedelta(days=duration_days)
+                else:
+                    new_start = now
+                    new_expiry = now + timedelta(days=duration_days)
+
+                invoice_no = f"INV-SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+                subscription = TenantSubscription(
+                    tenant_id=tenant_id,
+                    plan_id=plan.id,
+                    status="ACTIVE",
+                    price_paid=total_price,
+                    currency=plan.currency,
+                    started_at=new_start,
+                    expires_at=new_expiry,
+                    payment_method="RAZORPAY",
+                    payment_reference=successful_pmt.get("id"),
+                    invoice_number=invoice_no,
+                    notes=f"Auto-verified via Razorpay Order Check ({order_id})",
+                    auto_renew=True
+                )
+                db.add(subscription)
+                db.flush()
+
+                pmt_rec = SubscriptionPayment(
+                    subscription_id=subscription.id,
+                    tenant_id=tenant_id,
+                    amount=total_price,
+                    currency=plan.currency,
+                    payment_gateway="RAZORPAY",
+                    gateway_order_id=order_id,
+                    gateway_payment_id=successful_pmt.get("id"),
+                    status="SUCCESS",
+                    payment_date=now,
+                    notes=f"Auto-verified payment for {plan.name}"
+                )
+                db.add(pmt_rec)
+                db.commit()
+                db.refresh(subscription)
+
+                if weasyprint:
+                    try:
+                        pdf_path = os.path.join(INVOICES_DIR, f"{invoice_no}.pdf")
+                        html_doc = render_subscription_invoice_html(subscription, db, autoprint=False)
+                        pdf_bytes = weasyprint.HTML(string=html_doc, base_url=".").write_pdf()
+                        with open(pdf_path, "wb") as f:
+                            f.write(pdf_bytes)
+                    except Exception:
+                        pass
+
+                return {"paid": True, "status": "PAID", "payment_id": successful_pmt.get("id"), "subscription": _enrich_subscription_response(subscription)}
+
+        return {"paid": False, "status": status_val}
+    except Exception as e:
+        return {"paid": False, "error": str(e)}
 
 
 @router.get("/history", response_model=List[TenantSubscriptionResponse])

@@ -84,6 +84,7 @@ class RazorpayOrderCreate(BaseModel):
     plan_code: Optional[str] = None
     duration_months: Optional[int] = None
     outlet_id: Optional[UUID] = None
+    callback_url: Optional[str] = None
 
 
 class RazorpayOrderResponse(BaseModel):
@@ -100,6 +101,7 @@ class RazorpayOrderResponse(BaseModel):
     duration_days: Optional[int] = None
     billing_cycle: Optional[str] = None
     outlet_id: Optional[UUID] = None
+    payment_link_url: Optional[str] = None
 
     @field_serializer("amount", check_fields=False)
     def serialize_amount(self, v: Optional[Decimal]) -> Optional[float]:

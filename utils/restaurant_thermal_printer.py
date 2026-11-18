@@ -21,9 +21,9 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 
-# 80mm standard thermal roll width
-RECEIPT_WIDTH = 76 * mm
-MARGIN = 3 * mm
+# 80mm standard thermal roll safe printable area (70mm printable width, 2mm margin, 66mm content width)
+RECEIPT_WIDTH = 70 * mm
+MARGIN = 2 * mm
 CONTENT_WIDTH = RECEIPT_WIDTH - (2 * MARGIN)
 
 def ensure_upload_dirs():
@@ -96,7 +96,7 @@ def generate_kot_pdf(ticket, order, table_name="Takeaway", outlet_name="SirfBill
         [Paragraph(f"<b>Order #:</b> {order.order_number}", left_regular), Paragraph(f"<b>Type:</b> {order.order_type}", right_bold)],
         [Paragraph(f"<b>Date:</b> {created_str}", left_regular), ""]
     ]
-    t_meta = Table(meta_data, colWidths=[CONTENT_WIDTH * 0.55, CONTENT_WIDTH * 0.45])
+    t_meta = Table(meta_data, colWidths=[CONTENT_WIDTH * 0.52, CONTENT_WIDTH * 0.48])
     t_meta.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
@@ -278,7 +278,7 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
     cust_phone = f" ({order.customer_phone})" if getattr(order, 'customer_phone', None) else ""
     meta_data.append([Paragraph(f"<b>Customer:</b> {cust_name}{cust_phone}", left_regular), ""])
 
-    t_meta = Table(meta_data, colWidths=[CONTENT_WIDTH * 0.55, CONTENT_WIDTH * 0.45])
+    t_meta = Table(meta_data, colWidths=[CONTENT_WIDTH * 0.52, CONTENT_WIDTH * 0.48])
     t_meta.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
@@ -322,7 +322,7 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
             Paragraph(f"{item['total']:.2f}", right_regular),
         ])
 
-    t_lines = Table(lines_data, colWidths=[CONTENT_WIDTH * 0.44, CONTENT_WIDTH * 0.14, CONTENT_WIDTH * 0.20, CONTENT_WIDTH * 0.22])
+    t_lines = Table(lines_data, colWidths=[CONTENT_WIDTH * 0.42, CONTENT_WIDTH * 0.16, CONTENT_WIDTH * 0.20, CONTENT_WIDTH * 0.22])
     t_lines.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 1.5),
@@ -356,7 +356,7 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
     summary_data.append([Paragraph("<b>GRAND TOTAL:</b>", left_bold), Paragraph(f"<b>Rs. {float(order.grand_total):.2f}</b>", right_bold)])
     summary_data.append([Paragraph("<b>PAID AMOUNT:</b>", left_bold), Paragraph(f"<b>Rs. {float(order.paid_amount):.2f}</b>", right_bold)])
 
-    t_sum = Table(summary_data, colWidths=[CONTENT_WIDTH * 0.55, CONTENT_WIDTH * 0.45])
+    t_sum = Table(summary_data, colWidths=[CONTENT_WIDTH * 0.52, CONTENT_WIDTH * 0.48])
     t_sum.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 1),

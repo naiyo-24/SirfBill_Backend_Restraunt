@@ -325,6 +325,54 @@ def get_order_by_id(
     return order
 
 
+@router.patch("/{order_id}")
+def patch_order(
+    order_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Direct PATCH endpoint to update status, table, or notes on an order.
+    Eliminates 405 Method Not Allowed from client updates.
+    """
+    try:
+        val_uuid = UUID(order_id)
+        order = db.query(RestaurantOrder).filter(RestaurantOrder.id == val_uuid).first()
+    except (ValueError, TypeError):
+        order = db.query(RestaurantOrder).filter(RestaurantOrder.order_number == order_id).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    new_status = payload.get("status") or payload.get("order_status") or payload.get("kitchen_status")
+    if new_status:
+        order.status = str(new_status).upper()
+
+    if "notes" in payload:
+        order.notes = payload["notes"]
+    if "customer_name" in payload:
+        order.customer_name = payload["customer_name"]
+    if "customer_phone" in payload:
+        order.customer_phone = payload["customer_phone"]
+    if "table_id" in payload and payload["table_id"]:
+        try:
+            order.table_id = UUID(str(payload["table_id"]))
+        except Exception:
+            pass
+
+    order.updated_at = get_current_time()
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "id": str(order.id),
+        "order_number": order.order_number,
+        "status": order.status,
+        "message": f"Order {order.order_number} status updated to {order.status}"
+    }
+
+
 from schemas.restaurant_order import RestaurantApplyDiscount
 
 @router.patch("/{order_id}/items", response_model=RestaurantOrderResponse)

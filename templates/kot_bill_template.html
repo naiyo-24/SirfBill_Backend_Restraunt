@@ -5,30 +5,34 @@
 <title>KOT - {{ ticket.ticket_number }}</title>
 <style>
   @page {
-    size: 80mm auto;
+    size: 72mm auto;
     margin: 0;
   }
   @media print {
     body {
-      width: 78mm;
-      margin: 0 auto;
+      width: 70mm !important;
+      max-width: 70mm !important;
+      margin: 0 auto !important;
+      padding: 1.5mm 1.5mm 5mm 1.5mm !important;
     }
   }
   body {
-    width: 78mm;
+    width: 70mm;
+    max-width: 70mm;
     margin: 0 auto;
-    padding: 3mm 2mm 8mm 2mm;
+    padding: 2mm 1.5mm 6mm 1.5mm;
     font-family: 'Courier New', Courier, monospace;
-    font-size: 12px;
+    font-size: 11.5px;
     line-height: 1.25;
     color: #000;
     background: #fff;
     box-sizing: border-box;
+    overflow-x: hidden;
     -webkit-print-color-adjust: exact;
   }
 
   .text-center { text-align: center; }
-  .text-right { text-align: right; }
+  .text-right { text-align: right; padding-right: 2px; }
   .text-left { text-align: left; }
   .bold { font-weight: bold; }
 
@@ -74,31 +78,36 @@
   /* Meta table */
   .meta-table {
     width: 100%;
+    table-layout: fixed;
     margin-top: 2px;
     font-size: 11.5px;
     border-collapse: collapse;
+    box-sizing: border-box;
   }
   .meta-table td {
     padding: 2px 0;
     vertical-align: top;
+    word-break: break-word;
   }
 
   .table-box {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 900;
   }
 
   /* Items table */
   .items-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     margin: 4px 0;
     font-size: 12px;
+    box-sizing: border-box;
   }
   .items-table th {
     padding: 4px 0;
     font-weight: 900;
-    font-size: 13px;
+    font-size: 12.5px;
     border-top: 1.5px dashed #000;
     border-bottom: 1.5px dashed #000;
   }
@@ -108,15 +117,16 @@
   }
 
   .qty-col {
-    width: 20%;
-    font-size: 17px;
+    width: 22%;
+    font-size: 16px;
     font-weight: 900;
     text-align: center;
   }
   .item-col {
-    width: 80%;
-    font-size: 13.5px;
+    width: 78%;
+    font-size: 13px;
     font-weight: 900;
+    word-break: break-word;
   }
   .variant-tag {
     font-size: 11px;
@@ -127,6 +137,7 @@
     font-weight: bold;
     font-style: italic;
     padding-left: 5px;
+    word-break: break-word;
   }
   .instructions-box {
     font-size: 11px;
@@ -135,13 +146,16 @@
     padding: 2px 4px;
     margin-top: 2px;
     display: inline-block;
+    word-break: break-word;
   }
 
   /* Footer */
   .footer-summary {
     width: 100%;
+    table-layout: fixed;
     font-size: 12px;
     margin-top: 3px;
+    box-sizing: border-box;
   }
   .footer-summary td {
     padding: 2px 0;

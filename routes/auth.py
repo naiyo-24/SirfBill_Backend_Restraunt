@@ -160,7 +160,9 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
         
-    if user.role not in ["ADMIN", "OWNER", "MANAGER", "CASHIER", "KITCHEN", "WAITER"]:
+    role_upper = (user.role or "").upper()
+    allowed_roles = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "KITCHEN", "WAITER", "CHEF", "SUPER_ADMIN", "STAFF"]
+    if role_upper not in allowed_roles:
         raise HTTPException(status_code=403, detail="You do not have access privileges")
         
     # Plain text password comparison (no hashing)
