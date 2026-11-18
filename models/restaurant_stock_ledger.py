@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from .database import Base
+from utils.timezone import get_current_time
 
 class RestaurantStockLedger(Base):
     """
@@ -29,7 +30,7 @@ class RestaurantStockLedger(Base):
 
     actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=get_current_time, nullable=False)
 
     ingredient = relationship("RestaurantIngredient", back_populates="ledger_entries")
     outlet = relationship("RestaurantOutlet")

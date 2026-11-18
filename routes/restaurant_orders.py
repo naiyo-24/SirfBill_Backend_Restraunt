@@ -26,6 +26,7 @@ from schemas.restaurant_kitchen import KitchenTicketResponse
 from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
 from utils.restaurant_thermal_printer import generate_kot_pdf, generate_bill_pdf
 from utils.restaurant_inventory_helper import resolve_branch_ingredient, normalize_recipe_uom
+from utils.timezone import get_current_time
 
 router = APIRouter(
     prefix="/api/restaurant/orders",
@@ -33,8 +34,8 @@ router = APIRouter(
 )
 
 def _generate_order_number(db: Session, outlet_id: UUID) -> str:
-    """Generate sequential order number ORD-YYYYMMDD-XXXX."""
-    today_str = datetime.utcnow().strftime("%Y%m%d")
+    """Generate sequential order number ORD-YYYYMMDD-XXXX in IST."""
+    today_str = get_current_time().strftime("%Y%m%d")
     prefix = f"ORD-{today_str}-"
     count = (
         db.query(RestaurantOrder)

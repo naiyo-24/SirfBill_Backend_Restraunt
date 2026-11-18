@@ -20,6 +20,7 @@ from schemas.restaurant_stock_transfer import (
     StockTransferReceiveInput, StockTransferResponse, StockTransferItemResponse
 )
 from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
+from utils.timezone import get_current_time
 
 router = APIRouter(
     prefix="/api/restaurant/inventory/transfers",
@@ -42,7 +43,7 @@ def generate_transfer_number(db: Session, tenant_id: UUID) -> str:
     """
     Generates a sequential transfer number per tenant for the current month: ST-YYYYMM-XXXX
     """
-    now = datetime.utcnow()
+    now = get_current_time()
     prefix = f"ST-{now.strftime('%Y%m')}-"
     
     count = db.query(func.count(RestaurantStockTransfer.id)).filter(
@@ -445,7 +446,7 @@ def dispatch_stock_transfer(
         if payload.notes:
             transfer.notes = f"{transfer.notes or ''}\nDispatch note: {payload.notes}".strip()
 
-    transfer.dispatched_at = datetime.utcnow()
+    transfer.dispatched_at = get_current_time()
     transfer.dispatched_by_id = current_user.id if current_user else None
 
     # Process items
@@ -557,7 +558,7 @@ def receive_stock_transfer(
     if payload.receiver_signature:
         transfer.receiver_signature = payload.receiver_signature
 
-    transfer.received_at = datetime.utcnow()
+    transfer.received_at = get_current_time()
     transfer.received_by_id = current_user.id if current_user else None
 
     # Map incoming received payload by item ID
@@ -652,7 +653,7 @@ def receive_stock_transfer(
 
             dest_ing.current_stock = old_dest_stock + received_qty
             dest_ing.cost_per_unit = new_wac
-            dest_ing.last_restocked_at = datetime.utcnow()
+            dest_ing.last_restocked_at = get_current_time()
 
             # Append to destination branch stock ledger
             dest_ledger = RestaurantStockLedger(

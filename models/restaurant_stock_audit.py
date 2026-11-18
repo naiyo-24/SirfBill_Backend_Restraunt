@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from .database import Base
+from utils.timezone import get_current_time, get_current_date
 
 class RestaurantStockAudit(Base):
     """
@@ -19,7 +20,7 @@ class RestaurantStockAudit(Base):
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     auditor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
-    audit_date = Column(Date, default=lambda: datetime.utcnow().date(), nullable=False)
+    audit_date = Column(Date, default=get_current_date, nullable=False)
     audit_started_at = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
 
@@ -29,7 +30,7 @@ class RestaurantStockAudit(Base):
     total_deficit_rupees = Column(Numeric(12, 2), default=0.00, nullable=False)
     net_variance_rupees = Column(Numeric(12, 2), default=0.00, nullable=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=get_current_time, nullable=False)
 
     outlet = relationship("RestaurantOutlet")
     auditor = relationship("User")
@@ -62,7 +63,7 @@ class RestaurantStockAuditItem(Base):
     status = Column(String(20), default="MATCHED", nullable=False) # "MATCHED", "SURPLUS", "DEFICIT"
     notes = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=get_current_time, nullable=False)
 
     audit = relationship("RestaurantStockAudit", back_populates="items")
     ingredient = relationship("RestaurantIngredient")

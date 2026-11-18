@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from .database import Base
+from utils.timezone import get_current_time
 
 class RestaurantOrder(Base):
     """
@@ -44,8 +45,8 @@ class RestaurantOrder(Base):
     version = Column(Integer, default=1, nullable=False) # Optimistic locking concurrency check
     idempotency_key = Column(String(100), unique=True, nullable=True, index=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=get_current_time, nullable=False)
+    updated_at = Column(DateTime, default=get_current_time, onupdate=get_current_time, nullable=False)
 
     # Relationships
     outlet = relationship("RestaurantOutlet", back_populates="orders")

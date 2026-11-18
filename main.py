@@ -361,6 +361,94 @@ try:
         """))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_audit_items_audit ON restaurant_stock_audit_items (audit_id);"))
         conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_stock_audit_items_ing ON restaurant_stock_audit_items (ingredient_id);"))
+
+        # Subscription System schema assurance
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS subscription_plans (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                plan_code VARCHAR(50) UNIQUE NOT NULL,
+                name VARCHAR(100) NOT NULL,
+                description TEXT,
+                price NUMERIC(10, 2) NOT NULL DEFAULT 299.00,
+                currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+                billing_cycle VARCHAR(20) NOT NULL DEFAULT 'MONTHLY',
+                duration_days INTEGER NOT NULL DEFAULT 30,
+                features JSON NOT NULL DEFAULT '[]'::json,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                is_popular BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("ALTER TABLE subscription_plans ALTER COLUMN id SET DEFAULT gen_random_uuid();"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_sub_plans_code ON subscription_plans (plan_code);"))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS tenant_subscriptions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                tenant_id UUID NOT NULL,
+                outlet_id UUID REFERENCES restaurant_outlets(id) ON DELETE SET NULL,
+                plan_id UUID NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
+                status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
+                price_paid NUMERIC(10, 2) NOT NULL DEFAULT 299.00,
+                currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+                started_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                payment_method VARCHAR(50) DEFAULT 'UPI',
+                payment_reference VARCHAR(100),
+                invoice_number VARCHAR(100),
+                notes TEXT,
+                auto_renew BOOLEAN NOT NULL DEFAULT TRUE,
+                purchased_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+        """))
+        conn.execute(sa.text("ALTER TABLE tenant_subscriptions ALTER COLUMN id SET DEFAULT gen_random_uuid();"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_tenant_sub_tenant ON tenant_subscriptions (tenant_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_tenant_sub_status ON tenant_subscriptions (status);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_tenant_sub_expires ON tenant_subscriptions (expires_at);"))
+
+        conn.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS subscription_payments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                subscription_id UUID NOT NULL REFERENCES tenant_subscriptions(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL,
+                amount NUMERIC(10, 2) NOT NULL,
+                currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+                payment_gateway VARCHAR(50) NOT NULL DEFAULT 'MANUAL_UPI',
+                gateway_order_id VARCHAR(100),
+                gateway_payment_id VARCHAR(100),
+                status VARCHAR(30) NOT NULL DEFAULT 'SUCCESS',
+                payment_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                notes TEXT
+            );
+        """))
+        conn.execute(sa.text("ALTER TABLE subscription_payments ALTER COLUMN id SET DEFAULT gen_random_uuid();"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_sub_payments_sub ON subscription_payments (subscription_id);"))
+        conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_sub_payments_tenant ON subscription_payments (tenant_id);"))
+
+        # Seed the ₹299/month default plan if not present
+        conn.execute(sa.text("""
+            INSERT INTO subscription_plans (
+                id, plan_code, name, description, price, currency, billing_cycle, duration_days, features, is_active, is_popular, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(),
+                'RESTAURANT_PRO_299',
+                'SirfBill Restaurant Pro',
+                'Complete all-in-one restaurant management platform for point-of-sale, recipe costing, kitchen display, and perpetual inventory.',
+                299.00,
+                'INR',
+                'MONTHLY',
+                30,
+                '["Fast Touch POS Billing & Multi-Station KOT Printing", "Complete Recipe Management & Automatic BOM Inventory Deductions", "Multi-Branch Real-Time Inventory & Stock Transfers", "Physical Stock Audit & Variance Reconciliation", "Wastage & Spoilage Loss Tracking with Rupee Costing", "Interactive Table Layout & Live Kitchen Display (KDS)", "Automated Purchase Orders & Vendor GRN Inwarding", "Role-Based Multi-Staff Logins & Daily Shift Closure Reports"]'::json,
+                TRUE,
+                TRUE,
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (plan_code) DO NOTHING;
+        """))
 except Exception as e:
     print(f"Schema startup migration note: {e}")
 
@@ -486,6 +574,7 @@ from routes.restaurant_inventory import router as restaurant_inventory_router
 from routes.restaurant_stock_transfer import router as restaurant_stock_transfer_router
 from routes.restaurant_crm import router as restaurant_crm_router
 from routes.restaurant_procurement import router as restaurant_procurement_router
+from routes.restaurant_subscriptions import router as restaurant_subscriptions_router
 
 app.include_router(restaurant_outlets_router)
 app.include_router(restaurant_menu_router)
@@ -499,6 +588,7 @@ app.include_router(restaurant_inventory_router)
 app.include_router(restaurant_stock_transfer_router)
 app.include_router(restaurant_crm_router)
 app.include_router(restaurant_procurement_router)
+app.include_router(restaurant_subscriptions_router)
 
 @app.get("/")
 def read_root():

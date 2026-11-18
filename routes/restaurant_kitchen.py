@@ -11,6 +11,7 @@ from models.restaurant_kitchen import RestaurantKitchenTicket, RestaurantKitchen
 from models.restaurant_audit import RestaurantAuditEvent
 from schemas.restaurant_kitchen import KitchenTicketResponse, KitchenTicketItemResponse, KitchenEventCreate
 from dependencies import get_restaurant_kitchen, get_restaurant_staff
+from utils.timezone import get_current_time
 
 
 router = APIRouter(
@@ -63,7 +64,7 @@ def log_ticket_event(
     old_status = ticket.status
     ticket.status = payload.to_status
     if payload.to_status in ["READY", "SERVED"]:
-        ticket.completed_at = datetime.utcnow()
+        ticket.completed_at = get_current_time()
 
     # Log transition event
     event = RestaurantKitchenEvent(

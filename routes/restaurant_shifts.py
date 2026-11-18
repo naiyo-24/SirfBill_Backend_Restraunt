@@ -15,6 +15,7 @@ from models.restaurant_order import RestaurantOrder
 from models.restaurant_tender import RestaurantTender
 from schemas.restaurant_shift import RestaurantShiftOpen, RestaurantShiftClose, RestaurantShiftResponse
 from dependencies import get_restaurant_cashier
+from utils.timezone import get_current_time
 
 router = APIRouter(
     prefix="/api/restaurant/shifts",
@@ -45,7 +46,7 @@ def open_shift(
         tenant_id=tenant_id or uuid.uuid4(),
         cashier_id=cashier_user.id,
         status="OPEN",
-        opened_at=datetime.utcnow(),
+        opened_at=get_current_time(),
         opening_cash=payload.opening_cash,
         notes=payload.notes
     )
@@ -82,7 +83,7 @@ def close_shift(
     variance = Decimal(str(payload.counted_cash)) - expected
 
     shift.status = "CLOSED"
-    shift.closed_at = datetime.utcnow()
+    shift.closed_at = get_current_time()
     shift.counted_cash = payload.counted_cash
     shift.expected_cash = expected
     shift.variance = variance

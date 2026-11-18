@@ -113,3 +113,46 @@ def get_restaurant_kitchen(current_user: User = Depends(get_current_user)) -> Us
     """Allows KITCHEN staff, MANAGER, OWNER, or ADMIN for KOT status updates."""
     return require_restaurant_roles(["KITCHEN", "MANAGER", "OWNER", "ADMIN"])(current_user)
 
+def check_active_subscription(tenant_id, db: Session) -> bool:
+    """
+    Checks if a tenant currently has an active or trial subscription.
+    Evaluates against authoritative local server time (IST - Asia/Kolkata).
+    """
+    from utils.timezone import get_current_time
+    from models.restaurant_subscription import TenantSubscription
+
+    sub = db.query(TenantSubscription).filter(
+        TenantSubscription.tenant_id == tenant_id
+    ).order_by(TenantSubscription.expires_at.desc()).first()
+
+    if not sub:
+        return False
+
+    now = get_current_time()
+    # Active if expires_at is in the future and not cancelled
+    return (sub.expires_at > now) and (sub.status != "CANCELLED")
+
+def require_active_subscription(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Dependency that enforces an active subscription.
+    Throws HTTP 402 Payment Required if expired, triggering the payment screen across all modules.
+    """
+    tenant_id = current_user.tenant_id
+    if not tenant_id and current_user.outlet_id:
+        from models.restaurant_outlet import RestaurantOutlet
+        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == current_user.outlet_id).first()
+        if outlet:
+            tenant_id = outlet.tenant_id
+
+    # If tenant has no active/trial subscription, block with 402 Payment Required
+    if tenant_id and not check_active_subscription(tenant_id, db):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Subscription expired. Please renew your subscription plan (₹299/month) to continue using this module."
+        )
+
+    return current_user
+

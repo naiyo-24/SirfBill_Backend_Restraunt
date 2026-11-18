@@ -18,6 +18,7 @@ from schemas.category import CategoryCreate, CategoryUpdate, CategoryOut as Cate
 from models.distributor import Distributor
 from sqlalchemy import or_, cast, String
 from typing import List, Optional
+from utils.timezone import get_current_date
 
 router = APIRouter(
     prefix="/api/admin/shop",
@@ -744,13 +745,13 @@ async def upload_inventory_excel(
                 try:
                     exp = datetime.strptime(exp.strip(), "%Y-%m-%d").date()
                 except ValueError:
-                    exp = datetime.utcnow().date()
+                    exp = get_current_date()
             elif hasattr(exp, 'date'):
                 exp = exp.date()
             elif hasattr(exp, 'to_pydatetime'):
                 exp = exp.to_pydatetime().date()
             else:
-                exp = datetime.utcnow().date()
+                exp = get_current_date()
 
             try:
                 buying_price = float(str(get_val("buying_price", 0.0)).strip() or 0.0)

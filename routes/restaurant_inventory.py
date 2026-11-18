@@ -33,6 +33,7 @@ from schemas.restaurant_inventory import (
 )
 from utils.restaurant_inventory_helper import normalize_recipe_uom, calculate_recipe_costing_data, resolve_branch_ingredient
 from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
+from utils.timezone import get_current_time, get_current_date
 
 router = APIRouter(
     prefix="/api/restaurant/inventory",
@@ -856,7 +857,7 @@ def record_stock_adjustment(
         total_cost=total_cost_val,
         reason=payload.reason.strip().upper(),
         source_type="manual_adjustment",
-        source_id=f"ADJ-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+        source_id=f"ADJ-{get_current_time().strftime('%Y%m%d%H%M%S')}",
         actor_id=actor_id,
         notes=f"{payload.notes or 'Manual adjustment'} [Entered: {unit_label}]"
     )
@@ -864,7 +865,7 @@ def record_stock_adjustment(
 
     # Atomically adjust current cached balance
     ingredient.current_stock += signed_qty
-    ingredient.last_restocked_at = datetime.utcnow()
+    ingredient.last_restocked_at = get_current_time()
 
     db.commit()
     db.refresh(ledger_entry)
@@ -887,8 +888,8 @@ def submit_stock_audit(
     5. Clean Inventory Master: Updates current_stock without corrupting last_restocked_at.
     """
     outlet = resolve_outlet(db, payload.outlet_id)
-    audit_date = payload.audit_date or datetime.utcnow().date()
-    batch_code = f"AUDIT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+    audit_date = payload.audit_date or get_current_date()
+    batch_code = f"AUDIT-{get_current_time().strftime('%Y%m%d-%H%M%S')}"
 
     # Guard 4: Sort items ascending by ingredient_id to guarantee deterministic row locking order
     sorted_items = sorted(payload.items, key=lambda item: str(item.ingredient_id))
@@ -947,7 +948,7 @@ def submit_stock_audit(
         # Guard 1: Detect Book Drift during active counting window
         drift_note = None
         if item_input.expected_stock is not None and item_input.expected_stock != prev_stock:
-            since_time = payload.audit_started_at or datetime.utcnow().replace(hour=0, minute=0, second=0)
+            since_time = payload.audit_started_at or get_current_time().replace(hour=0, minute=0, second=0)
             shift_movement = db.query(func.coalesce(func.sum(RestaurantStockLedger.signed_quantity), 0)).filter(
                 RestaurantStockLedger.ingredient_id == ing.id,
                 RestaurantStockLedger.outlet_id == outlet.id,
@@ -1151,8 +1152,8 @@ def get_stock_audits(
 
         summaries.append(StockAuditBatchSummary(
             audit_batch_id=batch_id,
-            audit_date=b.created_at.date() if b.created_at else datetime.utcnow().date(),
-            created_at=b.created_at or datetime.utcnow(),
+            audit_date=b.created_at.date() if b.created_at else get_current_date(),
+            created_at=b.created_at or get_current_time(),
             outlet_id=outlet.id,
             auditor_name=auditor_name,
             items_adjusted=b.items_adjusted,
@@ -1231,7 +1232,7 @@ def get_stock_audit_detail(
 
     total_surplus = Decimal("0.00")
     total_deficit = Decimal("0.00")
-    audit_date = entries[0].created_at.date() if entries[0].created_at else datetime.utcnow().date()
+    audit_date = entries[0].created_at.date() if entries[0].created_at else get_current_date()
     results = []
 
     for e in entries:
@@ -1772,7 +1773,7 @@ def record_ingredient_waste(
     unit_cost = ingredient.cost_per_unit or Decimal("0.0000")
     total_cost_val = (norm_qty * unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    waste_code = f"WST-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    waste_code = f"WST-{get_current_time().strftime('%Y%m%d%H%M%S')}"
     waste_reason_tag = (payload.waste_reason or "SPOILAGE").strip().upper()
     notes_str = f"[{waste_reason_tag}] {payload.notes or 'Material loss/spoilage'} (Logged: {payload.quantity} {payload.input_uom or target_uom})"
 
@@ -1837,7 +1838,7 @@ def record_dish_waste(
         yield_val = Decimal("1.00")
 
     portions = Decimal(str(payload.portions or 1.00))
-    waste_code = f"DISH-WST-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    waste_code = f"DISH-WST-{get_current_time().strftime('%Y%m%d%H%M%S')}"
     waste_reason_tag = (payload.waste_reason or "BURNT_RUINED").strip().upper()
 
     # Multi-Branch Resolution: resolve each ingredient for this branch's local warehouse
@@ -1926,7 +1927,7 @@ def get_wastage_summary(
     - Top wasted ingredients by financial loss and quantity.
     """
     from datetime import timedelta
-    start_date = datetime.utcnow() - timedelta(days=days)
+    start_date = get_current_time() - timedelta(days=days)
     target_outlet = resolve_outlet(db, outlet_id)
 
     query = (
@@ -2039,7 +2040,7 @@ def get_food_cost_reconciliation(
     - Provides ingredient-level drill-down with health status.
     """
     from datetime import timedelta
-    start_date = datetime.utcnow() - timedelta(days=days)
+    start_date = get_current_time() - timedelta(days=days)
     target_outlet = resolve_outlet(db, outlet_id)
 
     # 1. Total POS Sales Revenue
@@ -2245,7 +2246,7 @@ def export_valuation_csv(
         content=csv_content,
         media_type="text/csv",
         headers={
-            "Content-Disposition": f"attachment; filename=stock_valuation_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+            "Content-Disposition": f"attachment; filename=stock_valuation_{get_current_time().strftime('%Y%m%d_%H%M%S')}.csv"
         }
     )
 

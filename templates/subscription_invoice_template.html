@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Subscription Invoice - SirfBill</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 6mm 8mm 5mm 8mm;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #0F172A;
+      background: #F1F5F9;
+      font-size: 9.8px;
+      line-height: 1.32;
+      padding: 12px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* Screen-only top action bar */
+    .no-print-bar {
+      max-width: 820px;
+      margin: 0 auto 12px auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #0F172A;
+      color: #FFFFFF;
+      padding: 10px 18px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+    }
+
+    .bar-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bar-logo-icon {
+      height: 20px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .bar-pill {
+      background: #059669;
+      color: #FFFFFF;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .bar-invoice-no {
+      font-size: 10.5px;
+      color: #94A3B8;
+    }
+
+    .bar-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+
+    .btn-print {
+      background: #0D9488;
+      color: #FFFFFF;
+    }
+
+    .btn-print:hover {
+      background: #0F766E;
+    }
+
+    .btn-upload {
+      background: #3B82F6;
+      color: #FFFFFF;
+    }
+
+    .btn-upload:hover {
+      background: #2563EB;
+    }
+
+    .btn-close {
+      background: #334155;
+      color: #F8FAFC;
+    }
+
+    .btn-close:hover {
+      background: #475569;
+    }
+
+    /* Document Sheet (Fit for exact 1-page A4 print) */
+    .invoice-sheet {
+      max-width: 820px;
+      margin: 0 auto;
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      padding: 18px 22px;
+      box-shadow: 0 2px 14px rgba(0, 0, 0, 0.04);
+      position: relative;
+      overflow: hidden;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    /* Background Watermark */
+    .watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-25deg);
+      font-size: 80px;
+      font-weight: 900;
+      color: rgba(13, 148, 136, 0.035);
+      letter-spacing: 6px;
+      pointer-events: none;
+      user-select: none;
+      z-index: 0;
+      white-space: nowrap;
+    }
+
+    .sheet-content {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header Table */
+    .header-table {
+      width: 100%;
+      border-collapse: collapse;
+      border-bottom: 2px solid #0F766E;
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .brand-col {
+      width: 60%;
+      vertical-align: top;
+    }
+
+    .meta-col {
+      width: 40%;
+      vertical-align: top;
+      text-align: right;
+    }
+
+    .brand-header-flex {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 5px;
+    }
+
+    .brand-logo-img {
+      height: 38px;
+      max-height: 38px;
+      width: auto;
+      object-fit: contain;
+      display: block;
+    }
+
+    .brand-header-text {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .brand-edition-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .brand-edition-name {
+      font-size: 15px;
+      font-weight: 800;
+      color: #0F766E;
+      letter-spacing: -0.3px;
+    }
+
+    .brand-logo-text {
+      font-size: 21px;
+      font-weight: 800;
+      color: #0F766E;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .brand-tag {
+      font-size: 10px;
+      background: #CCFBF1;
+      color: #0F766E;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 2px;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      font-weight: 600;
+      color: #334155;
+      margin-top: 1px;
+      margin-bottom: 0;
+    }
+
+    .brand-address {
+      font-size: 9.5px;
+      color: #475569;
+      line-height: 1.38;
+    }
+
+    .brand-reg {
+      font-size: 9.5px;
+      font-weight: 600;
+      color: #0F766E;
+      margin-top: 3px;
+    }
+
+    .invoice-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #0F172A;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .invoice-type {
+      font-size: 9.5px;
+      color: #0D9488;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .meta-line {
+      font-size: 10px;
+      color: #334155;
+      margin-bottom: 2px;
+    }
+
+    .meta-line strong {
+      color: #0F172A;
+      font-weight: 700;
+    }
+
+    .status-badge-paid {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #DCFCE7;
+      color: #15803D;
+      border: 1px solid #86EFAC;
+      font-weight: 800;
+      font-size: 10px;
+      padding: 2px 9px;
+      border-radius: 9999px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Metric Strip */
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin-bottom: 8px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .metric-item {
+      border-right: 1px solid #E2E8F0;
+      padding-right: 6px;
+    }
+
+    .metric-item:last-child {
+      border-right: none;
+      padding-right: 0;
+    }
+
+    .metric-label {
+      font-size: 8.5px;
+      text-transform: uppercase;
+      color: #64748B;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-bottom: 1px;
+    }
+
+    .metric-val {
+      font-size: 11px;
+      font-weight: 700;
+      color: #0F172A;
+    }
+
+    .metric-val.highlight {
+      color: #0D9488;
+    }
+
+    /* Parties Section */
+    .parties-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 8px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .party-card {
+      border: 1px solid #E2E8F0;
+      border-radius: 6px;
+      padding: 8px 12px;
+      background: #FFFFFF;
+    }
+
+    .party-card-title {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #0D9488;
+      border-bottom: 1px solid #F1F5F9;
+      padding-bottom: 3px;
+      margin-bottom: 5px;
+    }
+
+    .party-name {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #0F172A;
+      margin-bottom: 2px;
+    }
+
+    .party-text {
+      font-size: 9.8px;
+      color: #475569;
+      line-height: 1.35;
+      margin-bottom: 1px;
+    }
+
+    /* Line Items Table */
+    .table-container {
+      margin-bottom: 8px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #CBD5E1;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .items-table th {
+      background: #0F766E;
+      color: #FFFFFF;
+      font-size: 9.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 6px 9px;
+      text-align: left;
+    }
+
+    .items-table th.num {
+      text-align: right;
+    }
+
+    .items-table td {
+      padding: 6px 9px;
+      border-bottom: 1px solid #E2E8F0;
+      font-size: 9.8px;
+      color: #1E293B;
+      vertical-align: top;
+    }
+
+    .items-table td.num {
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .items-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .col-idx {
+      width: 6%;
+    }
+
+    .col-desc {
+      width: 50%;
+    }
+
+    .col-code {
+      width: 14%;
+    }
+
+    .col-dur {
+      width: 14%;
+    }
+
+    .col-amt {
+      width: 16%;
+    }
+
+    .item-desc-main {
+      font-weight: 700;
+      font-size: 11px;
+      color: #0F172A;
+      margin-bottom: 2px;
+    }
+
+    .item-desc-sub {
+      font-size: 9px;
+      color: #64748B;
+      line-height: 1.25;
+    }
+
+    /* Summary and Tax Split Grid */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 10px;
+      margin-bottom: 8px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .tax-breakdown-card {
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 6px;
+      padding: 7px 11px;
+    }
+
+    .tax-breakdown-title {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #475569;
+      margin-bottom: 4px;
+      border-bottom: 1px solid #E2E8F0;
+      padding-bottom: 2px;
+    }
+
+    .tax-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9.5px;
+      color: #334155;
+      margin-bottom: 2px;
+    }
+
+    .tax-row strong {
+      color: #0F172A;
+    }
+
+    .calculation-card {
+      border: 1px solid #CBD5E1;
+      border-radius: 6px;
+      background: #FFFFFF;
+      overflow: hidden;
+    }
+
+    .calc-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 10px;
+      border-bottom: 1px solid #F1F5F9;
+      font-size: 9.8px;
+      color: #334155;
+    }
+
+    .calc-row.total-row {
+      background: #F0FDF4;
+      border-bottom: none;
+      padding: 7px 10px;
+    }
+
+    .total-label {
+      font-size: 11.5px;
+      font-weight: 800;
+      color: #0F766E;
+    }
+
+    .total-val {
+      font-size: 15px;
+      font-weight: 800;
+      color: #0F766E;
+    }
+
+    .amount-words-box {
+      margin-top: 4px;
+      background: #F8FAFC;
+      border: 1px dashed #CBD5E1;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 9px;
+      color: #334155;
+    }
+
+    .amount-words-box strong {
+      color: #0F172A;
+    }
+
+    /* Features Checklist */
+    .features-card {
+      background: #F0FDFA;
+      border: 1px solid #CCFBF1;
+      border-radius: 6px;
+      padding: 6px 11px;
+      margin-bottom: 8px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .features-title {
+      font-size: 8.8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #0F766E;
+      margin-bottom: 4px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px 12px;
+    }
+
+    .feature-item {
+      font-size: 9px;
+      color: #134E4A;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 500;
+    }
+
+    .feature-check {
+      color: #0D9488;
+      font-weight: bold;
+    }
+
+    /* Signatures and Payment Strip */
+    .signature-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 10px;
+      align-items: flex-end;
+      padding-top: 0;
+      margin-bottom: 6px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .payment-info-box {
+      border: 1px solid #E2E8F0;
+      border-radius: 6px;
+      padding: 7px 11px;
+      background: #FAFAFA;
+    }
+
+    .payment-info-title {
+      font-size: 8.8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #475569;
+      margin-bottom: 3px;
+      letter-spacing: 0.5px;
+    }
+
+    .payment-info-row {
+      font-size: 9.5px;
+      color: #334155;
+      margin-bottom: 2px;
+    }
+
+    .text-settlement-success {
+      color: #059669;
+    }
+
+    .signatory-box {
+      border: 1px solid #CBD5E1;
+      border-radius: 6px;
+      padding: 6px 12px;
+      background: #FFFFFF;
+      text-align: center;
+      position: relative;
+    }
+
+    .signatory-company {
+      font-size: 10px;
+      font-weight: 700;
+      color: #0F172A;
+      margin-bottom: 2px;
+    }
+
+    .sign-image-container {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 2px 0;
+    }
+
+    .sign-image {
+      max-height: 46px;
+      max-width: 175px;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      filter: contrast(1.25) brightness(0.9);
+    }
+
+    .svg-sign-fallback {
+      font-family: 'Brush Script MT', 'Segoe Script', cursive, sans-serif;
+      font-size: 19px;
+      color: #0F766E;
+      transform: rotate(-2deg);
+      user-select: none;
+    }
+
+    .signatory-line {
+      border-top: 1px solid #94A3B8;
+      padding-top: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #0F172A;
+    }
+
+    .signatory-role {
+      font-size: 8.5px;
+      color: #64748B;
+    }
+
+    .digital-seal {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 8px;
+      color: #059669;
+      font-weight: 700;
+      background: #F0FDF4;
+      border: 1px solid #BBF7D0;
+      padding: 1px 5px;
+      border-radius: 3px;
+      margin-top: 2px;
+    }
+
+    /* Footer / Terms */
+    .invoice-footer {
+      border-top: 1px solid #E2E8F0;
+      padding-top: 6px;
+      font-size: 8.5px;
+      color: #64748B;
+      line-height: 1.35;
+      text-align: center;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .footer-note-sub {
+      margin-top: 2px;
+    }
+
+    .footer-brand-highlight {
+      margin-top: 2px;
+      font-weight: 700;
+      color: #0F766E;
+    }
+
+    /* Signature Upload Modal */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(15, 23, 42, 0.75);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-box {
+      background: #FFFFFF;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 440px;
+      width: 90%;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #0F172A;
+      margin-bottom: 8px;
+    }
+
+    .modal-desc {
+      font-size: 12px;
+      color: #64748B;
+      margin-bottom: 16px;
+    }
+
+    .file-dropzone {
+      border: 2px dashed #CBD5E1;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      background: #F8FAFC;
+      cursor: pointer;
+      margin-bottom: 16px;
+    }
+
+    .dropzone-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #0F172A;
+    }
+
+    .dropzone-help {
+      font-size: 11px;
+      color: #64748B;
+      margin-top: 4px;
+    }
+
+    .sig-input-hidden {
+      display: none;
+    }
+
+    .sig-selected-text {
+      font-size: 11px;
+      color: #0D9488;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .modal-btns {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    /* Print styling optimizations: STRICT 1 PAGE A4 */
+    @media print {
+      @page {
+        size: A4 portrait;
+        margin: 5mm 8mm 4mm 8mm;
+      }
+
+      html,
+      body {
+        background: #FFFFFF;
+        padding: 0;
+        margin: 0;
+        height: auto;
+      }
+
+      .no-print,
+      .no-print-bar {
+        display: none !important;
+      }
+
+      .invoice-sheet {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      .watermark {
+        opacity: 0.3;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Screen Only Action Toolbar -->
+  <div class="no-print-bar no-print">
+    <div class="bar-title">
+      <img src="{{ company.icon_url or '/uploads/brand/sirfbill_icon.png' }}" alt="SirfBill Logo" class="bar-logo-icon">
+      <span>SirfBill Restaurant Official Invoice</span>
+      <span class="bar-pill">Verified Bill</span>
+      <span class="bar-invoice-no">{{ invoice.invoice_number }}</span>
+    </div>
+    <div class="bar-actions">
+      <button type="button" class="btn btn-print" onclick="window.print()">
+        🖨️ Print / Save PDF
+      </button>
+      <button type="button" class="btn btn-close" onclick="window.close() || window.history.back()">
+        ✖ Close
+      </button>
+    </div>
+  </div>
+
+  <!-- Document Sheet -->
+  <div class="invoice-sheet">
+    <div class="watermark">SIRFBILL PRO</div>
+
+    <div class="sheet-content">
+
+      <!-- Header Section -->
+      <table class="header-table">
+        <tbody>
+          <tr>
+            <td class="brand-col">
+              <div class="brand-header-flex">
+                <img src="{{ company.logo_url or '/uploads/brand/sirfbill_logo.png' }}" alt="SirfBill" class="brand-logo-img">
+                <div class="brand-header-text">
+                  <div class="brand-edition-row">
+                    <span class="brand-edition-name">Restaurant</span>
+                    <span class="brand-tag">PRO</span>
+                  </div>
+                  <div class="brand-subtitle">Powered By Naiyo24 Private Limited</div>
+                </div>
+              </div>
+              <div class="brand-address">
+                Address: <strong>1/30B, Chittaranjan Colony, Baghajatin Colony, Kolkata, West Bengal -
+                  700032</strong><br>
+                Contact Person: <strong>Debasish Baidya</strong> | Phone: <strong>+91 6289171798</strong><br>
+                Email: <strong>naiyooffice@gmail.com</strong> | Web: <strong>www.naiyo24.com</strong>
+              </div>
+              <div class="brand-reg">
+                CIN: <strong>{{ company.cin or "U73100WB2024PTC271832" }}</strong> &nbsp;|&nbsp; GSTIN: <strong>{{ company.gstin or "19AATCM4745N1ZH" }}</strong>
+              </div>
+            </td>
+            <td class="meta-col">
+              <div class="invoice-title">Tax Invoice</div>
+              <div class="invoice-type">Subscription Entitlement &amp; Tax Challan</div>
+              <div class="meta-line">Invoice No: <strong>{{ invoice.invoice_number }}</strong></div>
+              <div class="meta-line">Issue Date: <strong>{{ invoice.formatted_started_at }}</strong></div>
+              <div class="meta-line">Place of Supply: <strong>West Bengal (19)</strong></div>
+              <div class="meta-line">Reverse Charge: <strong>No</strong></div>
+              <div>
+                <span class="status-badge-paid">✓ PAYMENT RECEIVED</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Metric Strip -->
+      <div class="metric-strip">
+        <div class="metric-item">
+          <div class="metric-label">Plan Subscribed</div>
+          <div class="metric-val highlight">{{ plan.name or "SirfBill Restaurant Pro" }}</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">Billing Cycle</div>
+          <div class="metric-val">{{ plan.duration_days or 30 }} Days ({{ plan.billing_cycle or "Monthly" }})</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">Subscription Start</div>
+          <div class="metric-val">{{ invoice.formatted_started_at }}</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">Subscription Expiry</div>
+          <div class="metric-val highlight">{{ invoice.formatted_expires_at }}</div>
+        </div>
+      </div>
+
+      <!-- Parties Section -->
+      <div class="parties-grid">
+        <div class="party-card">
+          <div class="party-card-title">Billed By (Service Provider)</div>
+          <div class="party-name">Naiyo24 Private Limited</div>
+          <div class="party-text">Platform: <strong>SirfBill Restaurant</strong></div>
+          <div class="party-text">CIN: <strong>U73100WB2024PTC271832</strong></div>
+          <div class="party-text">GSTIN: <strong>19AATCM4745N1ZH</strong> | State: <strong>19 (WB)</strong></div>
+          <div class="party-text">1/30B, Chittaranjan Colony, Baghajatin Colony, Kolkata - 700032</div>
+          <div class="party-text">Phone: <strong>+91 6289171798</strong> | Email: <strong>naiyooffice@gmail.com</strong>
+          </div>
+        </div>
+
+        <div class="party-card">
+          <div class="party-card-title">Billed To (Subscriber / Restaurant)</div>
+          <div class="party-name">{{ outlet.name or tenant_name or "Restaurant Super Admin" }}</div>
+          <div class="party-text">{{ outlet.address or "Registered Branch Location" }}</div>
+          <div class="party-text">Contact: <strong>{{ user.phone or outlet.phone or "+91 Registered Mobile" }}</strong>
+          </div>
+          <div class="party-text">Account Email: <strong>{{ user.email or "superadmin@restaurant.com" }}</strong></div>
+          <div class="party-text">Tenant ID: <strong>{{ invoice.tenant_id }}</strong></div>
+        </div>
+      </div>
+
+      <!-- Itemized Table -->
+      <div class="table-container">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th class="col-idx">#</th>
+              <th class="col-desc">Service Description</th>
+              <th class="col-code">Service Code</th>
+              <th class="col-dur">Duration</th>
+              <th class="col-amt num">Amount (INR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>01</td>
+              <td>
+                <div class="item-desc-main">{{ plan.name or "SirfBill Restaurant Pro" }} — SaaS License</div>
+                <div class="item-desc-sub">
+                  Complete Point-of-Sale, Multi-Station KOT Printing, Live Kitchen Display (KDS), Recipe BOM Inventory
+                  Deductions, Shift Closure, and Multi-Branch Management.
+                </div>
+              </td>
+              <td><strong>998313</strong></td>
+              <td>{{ plan.duration_days or 30 }} Days ({{ plan.billing_cycle or "Monthly" }})</td>
+              <td class="num">₹{{ calculation.base_amount }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Financial Calculation and Statutory Summary -->
+      <div class="summary-grid">
+        <div class="tax-breakdown-card">
+          <div class="tax-breakdown-title">Statutory GST &amp; Tax Assessment Details</div>
+          <div class="tax-row">
+            <span>Taxable Value (Base License Fee):</span>
+            <strong>₹{{ calculation.base_amount }}</strong>
+          </div>
+          <div class="tax-row">
+            <span>Central GST (CGST @ 9.00%):</span>
+            <strong>₹{{ calculation.cgst }}</strong>
+          </div>
+          <div class="tax-row">
+            <span>State GST (SGST @ 9.00%):</span>
+            <strong>₹{{ calculation.sgst }}</strong>
+          </div>
+          <div class="tax-row">
+            <span>Total Goods &amp; Services Tax (18.00%):</span>
+            <strong>₹{{ calculation.total_tax }}</strong>
+          </div>
+          <div class="amount-words-box">
+            Amount in Words: <strong>{{ calculation.amount_in_words or "Rupees Two Hundred Ninety-Nine Only" }}</strong>
+          </div>
+        </div>
+
+        <div class="calculation-card">
+          <div class="calc-row">
+            <span>Net Taxable Base</span>
+            <strong>₹{{ calculation.base_amount }}</strong>
+          </div>
+          <div class="calc-row">
+            <span>Total GST (18%)</span>
+            <strong>₹{{ calculation.total_tax }}</strong>
+          </div>
+          <div class="calc-row total-row">
+            <span class="total-label">Total Amount Paid</span>
+            <span class="total-val">₹{{ calculation.gross_amount }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Features Checklist -->
+      <div class="features-card">
+        <div class="features-title">Active Modules &amp; Software Entitlements Included</div>
+        <div class="features-grid">
+          <div class="feature-item"><span class="feature-check">✓</span> Fast Touch POS Billing &amp; Multi-Station KOT
+            Printing</div>
+          <div class="feature-item"><span class="feature-check">✓</span> Complete Recipe BOM Inventory Deductions</div>
+          <div class="feature-item"><span class="feature-check">✓</span> Live Kitchen Display (KDS) &amp; Order Status
+            Tracker</div>
+          <div class="feature-item"><span class="feature-check">✓</span> Multi-Branch Stock Transfers &amp; Perpetual
+            Ledger</div>
+          <div class="feature-item"><span class="feature-check">✓</span> Physical Stock Audit &amp; Shift Drift
+            Reconciliation</div>
+          <div class="feature-item"><span class="feature-check">✓</span> Wastage, Spoilage &amp; Dish Scrap Rupee
+            Costing</div>
+          <div class="feature-item"><span class="feature-check">✓</span> Cashier Shift Opening, Cash Float &amp;
+            Variance Audit</div>
+          <div class="feature-item"><span class="feature-check">✓</span> Super Admin, Manager, Cashier &amp; Waiter Role
+            Logins</div>
+        </div>
+      </div>
+
+      <!-- Signature and Payment Strip -->
+      <div class="signature-grid">
+        <div class="payment-info-box">
+          <div class="payment-info-title">Payment Settlement Details</div>
+          <div class="payment-info-row">Gateway / Mode: <strong>{{ invoice.payment_method or "Razorpay Gateway (Online
+              UPI/Card)" }}</strong></div>
+          <div class="payment-info-row">Transaction / UTR: <strong>{{ invoice.payment_reference or "RZP_TXN_COMPLETED"
+              }}</strong></div>
+          <div class="payment-info-row">Settlement Status: <strong class="text-settlement-success">SUCCESS /
+              CLEARED</strong></div>
+          <div class="payment-info-row">Timestamp: <strong>{{ invoice.formatted_started_at }} IST</strong></div>
+        </div>
+
+        <div class="signatory-box">
+          <div class="signatory-company">For Naiyo24 Private Limited</div>
+          <div class="sign-image-container">
+            {% if signature_url %}
+            <img src="{{ signature_url }}" alt="Authorized Signature" class="sign-image">
+            {% else %}
+            <div class="svg-sign-fallback">Debasish Baidya</div>
+            {% endif %}
+          </div>
+          <div class="signatory-line">Debasish Baidya</div>
+          <div class="signatory-role">Director / Authorized Signatory</div>
+          <div>
+            <span class="digital-seal">Verified Official Digital Receipt</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Notes -->
+      <div class="invoice-footer">
+        <p>This is an official computer-generated Tax Invoice and software entitlement challan issued by <strong>Naiyo24
+            Private Limited</strong> under GSTIN: <strong>19AATCM4745N1ZH</strong>.</p>
+        <p class="footer-note-sub">Issued in accordance with the provisions of the Central Goods and Services Tax Act,
+          2017 and Information Technology Act.</p>
+        <p class="footer-brand-highlight">SirfBill Restaurant — Powered By Naiyo24 Private Limited</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Upload Signature Modal (Opens on Click) -->
+  <div class="modal-backdrop" id="sigModal">
+    <div class="modal-box">
+      <div class="modal-title">Upload Authorized Signature</div>
+      <div class="modal-desc">
+        Upload an official signature image (.png, .jpg) to appear directly on all subscription invoices and challans.
+      </div>
+
+      <form id="sigForm" enctype="multipart/form-data" onsubmit="event.preventDefault(); submitSignature();">
+        <div class="file-dropzone" onclick="document.getElementById('sigInput').click()">
+          <p class="dropzone-label">Click to select signature file</p>
+          <p class="dropzone-help">Recommended: Transparent PNG (max 500 KB)</p>
+          <input type="file" id="sigInput" name="file" accept="image/png, image/jpeg, image/svg+xml"
+            class="sig-input-hidden" onchange="previewSig(this)">
+          <div id="fileSelected" class="sig-selected-text"></div>
+        </div>
+
+        <div class="modal-btns">
+          <button type="button" class="btn btn-close" onclick="closeSignatureModal()">Cancel</button>
+          <button type="submit" class="btn btn-upload" id="uploadBtn">Save Signature</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function openSignatureModal() {
+      document.getElementById('sigModal').style.display = 'flex';
+    }
+    function closeSignatureModal() {
+      document.getElementById('sigModal').style.display = 'none';
+    }
+    function previewSig(input) {
+      if (input.files?.length) {
+        document.getElementById('fileSelected').innerText = 'Selected: ' + input.files[0].name;
+      }
+    }
+    async function submitSignature() {
+      const input = document.getElementById('sigInput');
+      if (!input.files?.length) {
+        alert('Please choose a signature image first.');
+        return;
+      }
+      const formData = new FormData();
+      formData.append('file', input.files[0]);
+
+      const btn = document.getElementById('uploadBtn');
+      btn.innerText = 'Uploading...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/subscriptions/signature', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('Signature updated successfully! Refreshing bill...');
+          window.location.reload();
+        } else {
+          alert('Upload failed: ' + (data.detail || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error uploading signature: ' + err.message);
+      } finally {
+        btn.innerText = 'Save Signature';
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+
+</html>

@@ -33,6 +33,7 @@ from schemas.restaurant_procurement import (
     GRNCreate, GRNResponse, GRNItemResponse
 )
 from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
+from utils.timezone import get_current_time, get_current_date
 
 router = APIRouter(
     prefix="/api/restaurant/procurement",
@@ -97,7 +98,7 @@ def generate_supplier_code(db: Session, outlet_id: UUID, name: str) -> str:
         candidate = f"SUP-{base}-{counter:02d}"
 
 def generate_next_po_number(db: Session, outlet_id: UUID) -> str:
-    now = datetime.utcnow()
+    now = get_current_time()
     prefix = f"PO-{now.strftime('%Y%m')}"
     count = db.query(func.count(RestaurantPurchaseOrder.id)).filter(
         RestaurantPurchaseOrder.outlet_id == outlet_id,
@@ -114,7 +115,7 @@ def generate_next_po_number(db: Session, outlet_id: UUID) -> str:
         candidate += 1
 
 def generate_next_grn_number(db: Session, outlet_id: UUID) -> str:
-    now = datetime.utcnow()
+    now = get_current_time()
     prefix = f"GRN-{now.strftime('%Y%m')}"
     count = db.query(func.count(RestaurantGRN.id)).filter(
         RestaurantGRN.outlet_id == outlet_id,
@@ -434,7 +435,7 @@ def create_purchase_order(
         supplier_id=supplier.id,
         po_number=po_number,
         status="DRAFT",
-        order_date=payload.order_date or datetime.utcnow().date(),
+        order_date=payload.order_date or get_current_date(),
         expected_delivery_date=payload.expected_delivery_date,
         subtotal=subtotal,
         tax_amount=tax_amount,
@@ -1118,7 +1119,7 @@ def receive_goods(
 
             # 5. Atomically increment ingredient current stock balance (in recipe UOM)
             ingredient.current_stock += stock_received_qty
-            ingredient.last_restocked_at = datetime.utcnow()
+            ingredient.last_restocked_at = get_current_time()
 
     # Create GRN header
     grn = RestaurantGRN(
@@ -1130,7 +1131,7 @@ def receive_goods(
         supplier_invoice_no=payload.supplier_invoice_no,
         invoice_date=payload.invoice_date,
         invoice_document_url=payload.invoice_document_url,
-        received_date=datetime.utcnow(),
+        received_date=get_current_time(),
         received_by_id=manager_user.id if manager_user else None,
         total_amount=total_amount,
         payment_status=payload.payment_status or "UNPAID",

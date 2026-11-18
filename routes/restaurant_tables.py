@@ -257,9 +257,9 @@ def open_table_order(
         db.refresh(existing_order)
         return existing_order
 
-    # Generate sequential order number
-    from datetime import datetime
-    today_str = datetime.utcnow().strftime("%Y%m%d")
+    # Generate sequential order number in IST
+    from utils.timezone import get_current_time
+    today_str = get_current_time().strftime("%Y%m%d")
     prefix = f"ORD-{today_str}-"
     count = (
         db.query(RestaurantOrder)
