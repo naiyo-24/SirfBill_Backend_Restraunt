@@ -30,6 +30,51 @@ def ensure_upload_dirs():
     os.makedirs("uploads/kots", exist_ok=True)
     os.makedirs("uploads/bills", exist_ok=True)
     os.makedirs("uploads/inventory", exist_ok=True)
+    os.makedirs("uploads/cache", exist_ok=True)
+
+def enhance_thermal_logo(image_path: str) -> str:
+    """
+    Takes an input logo image (colored / transparent PNG/JPEG),
+    crops empty padding, composites on white, and applies high-contrast
+    thermal binarization so colored logos print bold, solid black on 1-bit thermal printers.
+    Returns path to enhanced temporary thermal logo.
+    """
+    try:
+        from PIL import Image, ImageOps
+        im = Image.open(image_path).convert('RGBA')
+        # 1. Flatten alpha over pure white
+        bg = Image.new('RGBA', im.size, (255, 255, 255, 255))
+        flattened = Image.alpha_composite(bg, im).convert('L') # Grayscale
+
+        # 2. Invert to find content bounding box (non-white)
+        inverted = ImageOps.invert(flattened)
+        bbox = inverted.getbbox()
+        if bbox:
+            w, h = flattened.size
+            bbox = (max(0, bbox[0]-4), max(0, bbox[1]-4), min(w, bbox[2]+4), min(h, bbox[3]+4))
+            cropped = flattened.crop(bbox)
+        else:
+            cropped = flattened
+
+        # 3. High-contrast thermal enhancement:
+        # Any colored symbol/text (lum < 238) is deepened to solid black
+        def thermal_curve(val):
+            if val >= 238:
+                return 255
+            elif val <= 170:
+                return 0
+            else:
+                factor = (val - 170) / (238 - 170)
+                return int(factor * 255)
+
+        enhanced = cropped.point(thermal_curve)
+        base_name = os.path.basename(image_path).rsplit('.', 1)[0]
+        out_path = f'uploads/cache/enhanced_thermal_{base_name}.png'
+        enhanced.save(out_path, format='PNG')
+        return out_path
+    except Exception as e:
+        print(f"Error enhancing logo for thermal printing: {e}")
+        return image_path
 
 def generate_kot_pdf(ticket, order, table_name="Takeaway", outlet_name="SirfBill Restaurant") -> str:
     """
@@ -248,7 +293,8 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
 
     if logo_file:
         try:
-            elements.append(RLImage(logo_file, width=44*mm, height=22*mm))
+            enhanced_logo_file = enhance_thermal_logo(logo_file)
+            elements.append(RLImage(enhanced_logo_file, width=52*mm, height=26*mm))
             elements.append(Spacer(1, 2*mm))
         except Exception:
             pass
