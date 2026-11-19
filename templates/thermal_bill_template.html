@@ -54,8 +54,8 @@
     margin-bottom: 3px;
   }
   .logo-img {
-    max-height: 55px;
-    max-width: 130px;
+    max-height: 80px;
+    max-width: 180px;
     object-fit: contain;
     filter: grayscale(100%) contrast(150%);
   }
@@ -309,15 +309,13 @@
     </tr>
     {% endif %}
 
-    {% if order.rounding_adjustment and order.rounding_adjustment != 0 %}
     <tr>
       <td>Round Off:</td>
-      <td class="text-right">{{ "%+.2f"|format(order.rounding_adjustment) }}</td>
+      <td class="text-right">&#8377;{{ "%+.2f"|format(order.rounding_adjustment or 0.0) }}</td>
     </tr>
-    {% endif %}
 
     <tr class="grand-total-row">
-      <td>INVOICE VALUE:</td>
+      <td>TOTAL INVOICE BILL:</td>
       <td class="text-right">&#8377;{{ "%.2f"|format(order.grand_total) }}</td>
     </tr>
   </table>
@@ -365,8 +363,11 @@
 
   <!-- 13. Powered By SirfBill & Thank You Visit Again -->
   <div class="double-line"></div>
-  <div class="text-center powered-by">Powered by SirfBill</div>
-  <div class="text-center thank-you">Thank You Visit Again !</div>
+  <div class="text-center thank-you">THANK YOU FOR DINING WITH US!</div>
+  <div class="text-center" style="font-size: 10px; margin-top: 1px;">Please visit again</div>
+  <div class="text-center bold" style="font-size: 11px; margin-top: 5px;">Sirfbill</div>
+  <div class="text-center bold" style="font-size: 10px; margin-top: 1px; color: #000;">Powered By Naiyo24 Pvt. Ltd.</div>
+  <div style="height: 18mm;"></div>
 
 </body>
 </html>

@@ -225,11 +225,11 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
     brand_sub = ParagraphStyle(
         'BrandSub',
         parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=7,
-        leading=9,
+        fontName='Helvetica-Bold',
+        fontSize=7.5,
+        leading=9.5,
         alignment=1,
-        textColor=colors.HexColor('#4B5563')
+        textColor=colors.black
     )
 
     elements = []
@@ -248,8 +248,8 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
 
     if logo_file:
         try:
-            elements.append(RLImage(logo_file, width=32*mm, height=18*mm))
-            elements.append(Spacer(1, 1.5*mm))
+            elements.append(RLImage(logo_file, width=44*mm, height=22*mm))
+            elements.append(Spacer(1, 2*mm))
         except Exception:
             pass
 
@@ -350,11 +350,23 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
         summary_data.append([Paragraph("CGST (2.5%):", left_regular), Paragraph(f"Rs. {half_tax:.2f}", right_regular)])
         summary_data.append([Paragraph("SGST (2.5%):", left_regular), Paragraph(f"Rs. {half_tax:.2f}", right_regular)])
     
-    if order.rounding_adjustment and abs(float(order.rounding_adjustment)) > 0:
-        summary_data.append([Paragraph("Round Off:", left_regular), Paragraph(f"Rs. {float(order.rounding_adjustment):+.2f}", right_regular)])
+    # Round Off
+    round_off_val = float(order.rounding_adjustment or 0.0)
+    if round_off_val == 0.0:
+        calc_total = float(order.subtotal) - float(order.discount_amount or 0.0) + tax_amt
+        diff = float(order.grand_total) - calc_total
+        if abs(diff) >= 0.005:
+            round_off_val = diff
+    
+    summary_data.append([
+        Paragraph("Round Off:", left_regular),
+        Paragraph(f"Rs. {round_off_val:+.2f}" if round_off_val != 0 else "Rs. 0.00", right_regular)
+    ])
 
-    summary_data.append([Paragraph("<b>GRAND TOTAL:</b>", left_bold), Paragraph(f"<b>Rs. {float(order.grand_total):.2f}</b>", right_bold)])
-    summary_data.append([Paragraph("<b>PAID AMOUNT:</b>", left_bold), Paragraph(f"<b>Rs. {float(order.paid_amount):.2f}</b>", right_bold)])
+    summary_data.append([
+        Paragraph("<b>TOTAL INVOICE BILL:</b>", left_bold),
+        Paragraph(f"<b>Rs. {float(order.grand_total):.2f}</b>", right_bold)
+    ])
 
     t_sum = Table(summary_data, colWidths=[CONTENT_WIDTH * 0.52, CONTENT_WIDTH * 0.48])
     t_sum.setStyle(TableStyle([
@@ -363,7 +375,7 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
         ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-        ('LINEABOVE', (0, -2), (-1, -2), 0.5, colors.black),
+        ('LINEABOVE', (0, -1), (-1, -1), 0.5, colors.black),
     ]))
     elements.append(t_sum)
 
@@ -374,11 +386,12 @@ def generate_bill_pdf(order, outlet, table_name="Takeaway") -> str:
     elements.append(Spacer(1, 2.5 * mm))
     elements.append(Paragraph("<b>Sirfbill</b>", brand_title))
     elements.append(Paragraph("Powered By Naiyo24 Pvt. Ltd.", brand_sub))
+    elements.append(Spacer(1, 15 * mm)) # Space in the bottom before thermal paper cutter cut
 
     # Dynamic height calculation to guarantee continuous fit on ONE roll page without large trailing gaps:
-    # Header: ~32mm, Meta: ~18mm, Items: ~5.5mm/item, Summary: ~20mm, Footer: ~20mm
+    # Header: ~35mm, Meta: ~18mm, Items: ~5.5mm/item, Summary: ~20mm, Footer: ~25mm, Bottom feed buffer: ~15mm
     num_items = len(consolidated_lines) if consolidated_lines else 1
-    doc_height = max(160, (145 + (num_items * 9.0))) * mm
+    doc_height = max(180, (165 + (num_items * 9.0))) * mm
     doc = SimpleDocTemplate(
         file_path,
         pagesize=(RECEIPT_WIDTH, doc_height),
