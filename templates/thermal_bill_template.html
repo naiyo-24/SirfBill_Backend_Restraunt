@@ -189,6 +189,44 @@
     margin-top: 2px;
     text-transform: uppercase;
   }
+  .meta-table-code {
+    font-size: 13px;
+  }
+  .item-col-item {
+    width: 52%;
+  }
+  .item-col-qty {
+    width: 16%;
+  }
+  .item-col-amt {
+    width: 32%;
+  }
+  .payment-summary-table {
+    font-size: 10.5px;
+  }
+  .tender-method-cell {
+    padding-left: 6px;
+  }
+  .payment-due-text {
+    font-size: 12px;
+    margin: 4px 0;
+  }
+  .visit-again-sub {
+    font-size: 10px;
+    margin-top: 1px;
+  }
+  .brand-name {
+    font-size: 11px;
+    margin-top: 5px;
+  }
+  .powered-by-brand {
+    font-size: 10px;
+    margin-top: 1px;
+    color: #000;
+  }
+  .bottom-feed-space {
+    height: 18mm;
+  }
 </style>
 </head>
 <body>
@@ -223,27 +261,29 @@
 
   <!-- 7. Order Type (TAKEAWAY / DINE IN / DELIVERY) & Table Details -->
   <table class="meta-table">
-    <tr>
-      <td class="bold order-type-badge">TYPE: {{ order.order_type | replace('_', ' ') }}</td>
-      {% if order.order_type == 'DINE_IN' and order.table_code %}
-      <td class="text-right bold" style="font-size: 13px;">TABLE: {{ order.table_code }}</td>
-      {% else %}
-      <td class="text-right bold"></td>
-      {% endif %}
-    </tr>
-    <tr>
-      <td>Bill No: <b>{{ order.order_number }}</b></td>
-      <td class="text-right">Cashier: <b>{{ cashier_name or 'Counter' }}</b></td>
-    </tr>
-    <tr>
-      <td>Date: {{ order.created_at.strftime('%d-%m-%Y %I:%M %p') if order.created_at else '' }}</td>
-      <td class="text-right">
-        {% if order.kot_number %}KOT No: <b>{{ order.kot_number }}</b>{% endif %}
-      </td>
-    </tr>
-    <tr>
-      <td colspan="2">Customer: <b>{{ order.customer_name or 'Walk-in Guest' }}</b>{% if order.customer_phone %} (Ph: {{ order.customer_phone }}){% endif %}</td>
-    </tr>
+    <tbody>
+      <tr>
+        <td class="bold order-type-badge">TYPE: {{ order.order_type | replace('_', ' ') }}</td>
+        {% if order.order_type == 'DINE_IN' and order.table_code %}
+        <td class="text-right bold meta-table-code">TABLE: {{ order.table_code }}</td>
+        {% else %}
+        <td class="text-right bold"></td>
+        {% endif %}
+      </tr>
+      <tr>
+        <td>Bill No: <b>{{ order.order_number }}</b></td>
+        <td class="text-right">Cashier: <b>{{ cashier_name or 'Counter' }}</b></td>
+      </tr>
+      <tr>
+        <td>Date: {{ order.created_at.strftime('%d-%m-%Y %I:%M %p') if order.created_at else '' }}</td>
+        <td class="text-right">
+          {% if order.kot_number %}KOT No: <b>{{ order.kot_number }}</b>{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2">Customer: <b>{{ order.customer_name or 'Walk-in Guest' }}</b>{% if order.customer_phone %} (Ph: {{ order.customer_phone }}){% endif %}</td>
+      </tr>
+    </tbody>
   </table>
 
   <!-- 8. Dotted Line -->
@@ -253,9 +293,9 @@
   <table class="item-table">
     <thead>
       <tr>
-        <th class="text-left" style="width: 52%;">ITEM</th>
-        <th class="text-center" style="width: 16%;">QTY</th>
-        <th class="text-right" style="width: 32%;">AMT</th>
+        <th class="text-left item-col-item">ITEM</th>
+        <th class="text-center item-col-qty">QTY</th>
+        <th class="text-right item-col-amt">AMT</th>
       </tr>
     </thead>
     <tbody>
@@ -281,67 +321,71 @@
 
   <!-- 10. Financial Calculations & GST Breakup -->
   <table class="summary-table">
-    <tr>
-      <td>Total Qty:</td>
-      <td class="text-right bold">{{ total_qty.count }}</td>
-    </tr>
-    <tr>
-      <td>Sub Total:</td>
-      <td class="text-right">&#8377;{{ "%.2f"|format(order.subtotal) }}</td>
-    </tr>
-    {% if order.discount_amount and order.discount_amount > 0 %}
-    <tr>
-      <td>Discount ({% if order.discount_reason %}{{ order.discount_reason }}{% else %}Special{% endif %}):</td>
-      <td class="text-right">-&#8377;{{ "%.2f"|format(order.discount_amount) }}</td>
-    </tr>
-    {% endif %}
+    <tbody>
+      <tr>
+        <td>Total Qty:</td>
+        <td class="text-right bold">{{ total_qty.count }}</td>
+      </tr>
+      <tr>
+        <td>Sub Total:</td>
+        <td class="text-right">&#8377;{{ "%.2f"|format(order.subtotal) }}</td>
+      </tr>
+      {% if order.discount_amount and order.discount_amount > 0 %}
+      <tr>
+        <td>Discount ({% if order.discount_reason %}{{ order.discount_reason }}{% else %}Special{% endif %}):</td>
+        <td class="text-right">-&#8377;{{ "%.2f"|format(order.discount_amount) }}</td>
+      </tr>
+      {% endif %}
 
-    <!-- GST Breakup (CGST 2.5% + SGST 2.5% for standard 5% restaurant tax) -->
-    {% if order.tax_amount and order.tax_amount > 0 %}
-    {% set half_tax = order.tax_amount / 2 %}
-    <tr>
-      <td>CGST (2.5%):</td>
-      <td class="text-right">&#8377;{{ "%.2f"|format(half_tax) }}</td>
-    </tr>
-    <tr>
-      <td>SGST (2.5%):</td>
-      <td class="text-right">&#8377;{{ "%.2f"|format(half_tax) }}</td>
-    </tr>
-    {% endif %}
+      <!-- GST Breakup (CGST 2.5% + SGST 2.5% for standard 5% restaurant tax) -->
+      {% if order.tax_amount and order.tax_amount > 0 %}
+      {% set half_tax = order.tax_amount / 2 %}
+      <tr>
+        <td>CGST (2.5%):</td>
+        <td class="text-right">&#8377;{{ "%.2f"|format(half_tax) }}</td>
+      </tr>
+      <tr>
+        <td>SGST (2.5%):</td>
+        <td class="text-right">&#8377;{{ "%.2f"|format(half_tax) }}</td>
+      </tr>
+      {% endif %}
 
-    <tr>
-      <td>Round Off:</td>
-      <td class="text-right">&#8377;{{ "%+.2f"|format(order.rounding_adjustment or 0.0) }}</td>
-    </tr>
+      <tr>
+        <td>Round Off:</td>
+        <td class="text-right">&#8377;{{ "%+.2f"|format(order.rounding_adjustment or 0.0) }}</td>
+      </tr>
 
-    <tr class="grand-total-row">
-      <td>TOTAL INVOICE BILL:</td>
-      <td class="text-right">&#8377;{{ "%.2f"|format(order.grand_total) }}</td>
-    </tr>
+      <tr class="grand-total-row">
+        <td>TOTAL INVOICE BILL:</td>
+        <td class="text-right">&#8377;{{ "%.2f"|format(order.grand_total) }}</td>
+      </tr>
+    </tbody>
   </table>
 
   <!-- 11. Payment Status / Tenders -->
   <div class="payment-box">
-    <table class="summary-table" style="font-size: 10.5px;">
-      <tr>
-        <td>Paid Amount:</td>
-        <td class="text-right bold">&#8377;{{ "%.2f"|format(order.paid_amount) }}</td>
-      </tr>
-      {% if order.tenders %}
-      {% for t in order.tenders %}
-      <tr>
-        <td style="padding-left: 6px;">&bull; {{ t.method }}:</td>
-        <td class="text-right">&#8377;{{ "%.2f"|format(t.amount) }}</td>
-      </tr>
-      {% endfor %}
-      {% endif %}
+    <table class="summary-table payment-summary-table">
+      <tbody>
+        <tr>
+          <td>Paid Amount:</td>
+          <td class="text-right bold">&#8377;{{ "%.2f"|format(order.paid_amount) }}</td>
+        </tr>
+        {% if order.tenders %}
+        {% for t in order.tenders %}
+        <tr>
+          <td class="tender-method-cell">&bull; {{ t.method }}:</td>
+          <td class="text-right">&#8377;{{ "%.2f"|format(t.amount) }}</td>
+        </tr>
+        {% endfor %}
+        {% endif %}
 
-      {% if order.change_due and order.change_due > 0 %}
-      <tr>
-        <td class="bold">Change Return:</td>
-        <td class="text-right bold">&#8377;{{ "%.2f"|format(order.change_due) }}</td>
-      </tr>
-      {% endif %}
+        {% if order.change_due and order.change_due > 0 %}
+        <tr>
+          <td class="bold">Change Return:</td>
+          <td class="text-right bold">&#8377;{{ "%.2f"|format(order.change_due) }}</td>
+        </tr>
+        {% endif %}
+      </tbody>
     </table>
   </div>
 
@@ -357,17 +401,17 @@
       <div class="qr-instruction bold">SCAN QR WITH ANY UPI APP TO PAY</div>
       <div class="qr-instruction">Amount: &#8377;{{ "%.2f"|format(balance_due) }}</div>
     {% else %}
-      <div class="bold" style="font-size: 12px; margin: 4px 0;">PAYMENT DUE: &#8377;{{ "%.2f"|format(balance_due) }}</div>
+      <div class="bold payment-due-text">PAYMENT DUE: &#8377;{{ "%.2f"|format(balance_due) }}</div>
     {% endif %}
   </div>
 
   <!-- 13. Powered By SirfBill & Thank You Visit Again -->
   <div class="double-line"></div>
   <div class="text-center thank-you">THANK YOU FOR DINING WITH US!</div>
-  <div class="text-center" style="font-size: 10px; margin-top: 1px;">Please visit again</div>
-  <div class="text-center bold" style="font-size: 11px; margin-top: 5px;">Sirfbill</div>
-  <div class="text-center bold" style="font-size: 10px; margin-top: 1px; color: #000;">Powered By Naiyo24 Pvt. Ltd.</div>
-  <div style="height: 18mm;"></div>
+  <div class="text-center visit-again-sub">Please visit again</div>
+  <div class="text-center bold brand-name">Sirfbill</div>
+  <div class="text-center bold powered-by-brand">Powered By Naiyo24 Pvt. Ltd.</div>
+  <div class="bottom-feed-space"></div>
 
 </body>
 </html>
