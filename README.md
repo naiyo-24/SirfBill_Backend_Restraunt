@@ -316,6 +316,66 @@ $$\text{Cash Variance} = \text{Actual Counted Cash} - \text{Expected Cash}$$
 
 Manages Kitchen Order Tickets (KOTs), prep station line item routing, and kitchen cooking transitions.
 
+### 🗄️ Kitchen Data Models & Relationship Diagram
+
+```mermaid
+erDiagram
+  ORDERS ||--o{ KITCHEN_KOTS : generates
+  KITCHEN_KOTS ||--o{ KOT_LINES : contains
+  MENU_ITEMS ||--o{ KOT_LINES : prepared_as
+
+  ORDERS {
+    uuid id PK
+    uuid outlet_id FK
+    string order_number
+    string order_type
+    string status
+  }
+
+  KITCHEN_KOTS {
+    uuid id PK
+    uuid order_id FK
+    uuid outlet_id FK
+    string kot_number
+    string prep_station
+    string status
+    datetime created_at
+  }
+
+  KOT_LINES {
+    uuid id PK
+    uuid kot_id FK
+    uuid item_id FK
+    string item_name
+    string variant_name
+    int quantity
+    string status
+    string notes
+  }
+
+  MENU_ITEMS {
+    uuid id PK
+    string name
+    string prep_station
+    boolean is_veg
+  }
+```
+
+#### KOT Station Routing & Preparation Flow
+```mermaid
+flowchart LR
+  Order[Order Cart Lines] -->|Send KOT Dispatch| Router{Station Router}
+  Router -->|Tandoor Items| KOT_Tandoor[KOT: Tandoor Station]
+  Router -->|Curry / Main| KOT_Main[KOT: Main Kitchen]
+  Router -->|Beverages| KOT_Bar[KOT: Bar Station]
+  
+  KOT_Tandoor --> Prep[Status: PREPARING]
+  KOT_Main --> Prep
+  KOT_Bar --> Prep
+  Prep --> Ready[Status: READY]
+  Ready --> Served[Status: SERVED]
+```
+
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -342,6 +402,89 @@ Manages Kitchen Order Tickets (KOTs), prep station line item routing, and kitche
 ## 3. 📦 Restaurant Inventory, Recipes & Procurement Module
 
 Tracks raw materials, Unit of Measure (UOM) conversions, recipes (Bill of Materials), Moving Weighted Average Cost (WAC), physical count audits, and inter-branch transfers.
+
+### 🗄️ Inventory, Recipe BOM & Procurement Relationship Diagram
+
+```mermaid
+erDiagram
+  INGREDIENT_CATEGORIES ||--o{ INGREDIENTS : classifies
+  INGREDIENTS ||--o{ RECIPE_LINES : used_in
+  MENU_ITEMS ||--o{ RECIPES : has_bom
+  RECIPES ||--o{ RECIPE_LINES : requires
+  INGREDIENTS ||--o{ STOCK_LEDGER : audits
+  INGREDIENTS ||--o{ AUDIT_ITEMS : physically_counted
+  STOCK_AUDITS ||--o{ AUDIT_ITEMS : batches
+  SUPPLIERS ||--o{ PURCHASE_ORDERS : receives
+  PURCHASE_ORDERS ||--o{ GRN : fulfills
+  GRN ||--o{ GRN_ITEMS : receipts
+  INGREDIENTS ||--o{ GRN_ITEMS : inwarded
+
+  INGREDIENTS {
+    uuid id PK
+    uuid outlet_id FK
+    uuid category_id FK
+    string name
+    string purchase_uom
+    string recipe_uom
+    numeric uom_conversion_factor
+    numeric current_stock
+    numeric cost_per_unit
+  }
+
+  RECIPES {
+    uuid id PK
+    uuid item_id FK
+    string variant_name
+    numeric yield_servings
+  }
+
+  RECIPE_LINES {
+    uuid id PK
+    uuid recipe_id FK
+    uuid ingredient_id FK
+    numeric quantity_required
+    string unit
+  }
+
+  STOCK_LEDGER {
+    uuid id PK
+    uuid ingredient_id FK
+    numeric signed_quantity
+    numeric unit_cost_at_time
+    numeric total_cost
+    string reason
+    string source_type
+  }
+
+  STOCK_AUDITS {
+    uuid id PK
+    string batch_code
+    date audit_date
+    numeric net_variance_rupees
+  }
+
+  AUDIT_ITEMS {
+    uuid id PK
+    uuid audit_id FK
+    uuid ingredient_id FK
+    numeric previous_stock
+    numeric physical_count
+    numeric variance
+    string status
+  }
+```
+
+#### Inward Procurement & BOM Consumption Pipeline
+```mermaid
+flowchart TD
+  Supplier[Vendor Supplier] -->|Delivery Invoice| PO[Purchase Order]
+  PO -->|Kitchen Dock Arrival| GRN[Goods Received Note]
+  GRN -->|WAC Update & Stock-In| Ledger[Restaurant Stock Ledger]
+  Ledger --> Stock[Ingredient Current Stock]
+  
+  KOT[KOT Dispatch / POS Settlement] -->|Recipe BOM Deduction| Deduct[Atomic Stock Deduction]
+  Deduct -->|Update Balance & Log Reason| Ledger
+```
 
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
@@ -385,6 +528,90 @@ $$\text{Rupee Variance Impact} = \text{Variance Qty} \times \text{WAC Unit Cost}
 ## 4. 👥 CRM, Loyalty & Executive Reports Module
 
 Unified multi-branch guest wallet, append-only loyalty points ledger, store credit (Khata), automated marketing notifications, and 5 executive financial costing reports.
+
+### 🗄️ CRM, Loyalty & Khata Relationship Diagram
+
+```mermaid
+erDiagram
+  OUTLETS ||--o{ CUSTOMERS : registers
+  TENANTS ||--o{ LOYALTY_RULES : configures
+  CUSTOMERS ||--o{ LOYALTY_LEDGER : points_trail
+  CUSTOMERS ||--o{ CREDIT_LEDGER : khata_tab
+  CUSTOMERS ||--o{ CRM_NOTIFICATIONS : dispatches
+  ORDERS ||--o{ LOYALTY_LEDGER : source_order
+  ORDERS ||--o{ CREDIT_LEDGER : order_credit
+
+  CUSTOMERS {
+    uuid id PK
+    uuid tenant_id FK
+    uuid home_outlet_id FK
+    string phone
+    string name
+    date dob
+    date anniversary
+    string gst_number
+    int total_visits
+    numeric total_spent
+    numeric avg_order_value
+    int loyalty_points
+    numeric credit_balance
+    numeric credit_limit
+    boolean opt_in_marketing
+  }
+
+  LOYALTY_RULES {
+    uuid id PK
+    uuid tenant_id FK
+    numeric earn_per_rupees
+    numeric point_value_inr
+    numeric min_order_for_redeem
+    numeric max_redeem_pct
+    int points_expiry_days
+  }
+
+  LOYALTY_LEDGER {
+    uuid id PK
+    uuid customer_id FK
+    int points_delta
+    int balance_after
+    string reason
+    string idempotency_key
+  }
+
+  CREDIT_LEDGER {
+    uuid id PK
+    uuid customer_id FK
+    uuid outlet_id FK
+    string transaction_type
+    numeric amount
+    numeric balance_after
+    string payment_mode
+    string idempotency_key
+  }
+
+  CRM_NOTIFICATIONS {
+    uuid id PK
+    uuid customer_id FK
+    string channel
+    string event_type
+    string recipient
+    string status
+  }
+```
+
+#### Guest Settlement & Loyalty Earning Pipeline
+```mermaid
+flowchart LR
+  Settle[Bill Settlement Event] --> Lookup{Guest Attached?}
+  Lookup -- No --> Walkin[Walk-In Guest: Skip CRM]
+  Lookup -- Yes --> Stats[Update Visits, Total Spend, AOV]
+  Stats --> RFM[Recalculate RFM Tag: VIP / REGULAR / NEW]
+  RFM --> Loyalty[Check Loyalty Rules & Credit Points]
+  Loyalty --> Ledger[Append to Loyalty Ledger]
+  
+  Settle -->|Settled on Store Credit| Khata[Debit Khata Balance & Append Credit Ledger]
+  Settle -->|Dispatch WhatsApp| Notif[Queue Digital Receipt Notification]
+```
 
 ### 🔌 API Endpoints (CRM & Loyalty)
 | Method | Endpoint | Description |
@@ -462,6 +689,65 @@ $$\text{Closing Valuation} = \text{Closing Stock} \times \text{Cost per Unit}$$
 
 Table-side ordering for captains, real-time floor plan visualization, seating assignments, and table transfers.
 
+### 🗄️ Floor Plan, Table Seating & Ordering Relationship Diagram
+
+```mermaid
+erDiagram
+  OUTLETS ||--o{ TABLES : organizes_by_floor
+  TABLES ||--o{ ORDERS : binds_session
+  ORDERS ||--o{ ORDER_LINES : holds_cart
+  USERS ||--o{ ORDERS : captain_attendant
+
+  TABLES {
+    uuid id PK
+    uuid outlet_id FK
+    string table_code
+    string section
+    int seating_capacity
+    string status
+    boolean is_active
+  }
+
+  ORDERS {
+    uuid id PK
+    uuid outlet_id FK
+    uuid table_id FK
+    uuid customer_id FK
+    string order_number
+    string order_type
+    string status
+    numeric grand_total
+    int version
+  }
+
+  ORDER_LINES {
+    uuid id PK
+    uuid order_id FK
+    uuid item_id FK
+    string item_name
+    string variant_name
+    int quantity
+    string kot_status
+  }
+
+  USERS {
+    uuid id PK
+    string username
+    string role
+  }
+```
+
+#### Table Lifecycle State Machine
+```mermaid
+stateDiagram-v2
+  [*] --> VACANT
+  VACANT --> OCCUPIED : Captain Seats Party & Opens Order
+  OCCUPIED --> OCCUPIED : Table Adds Extra Rounds / Items
+  OCCUPIED --> OCCUPIED : Transfer Table / Change Seating
+  OCCUPIED --> CLEANING : Cashier Settles Bill
+  CLEANING --> VACANT : Table Sanitized & Released
+```
+
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -484,6 +770,87 @@ Table-side ordering for captains, real-time floor plan visualization, seating as
 ## 6. 🛡️ Admin, Multi-Tenant & Subscription Module
 
 Role-based access control, tenant branch management, legal configuration, dynamic UPI QR generation, and platform billing.
+
+### 🗄️ Multi-Tenant, RBAC & Subscription Relationship Diagram
+
+```mermaid
+erDiagram
+  TENANTS ||--o{ OUTLETS : owns_branches
+  TENANTS ||--o{ SUBSCRIPTIONS : billed_for
+  SUBSCRIPTION_PLANS ||--o{ SUBSCRIPTIONS : tier_definition
+  OUTLETS ||--o{ USERS : employs_staff
+  OUTLETS ||--o{ SHOP_SETTINGS : customizes_brand
+  OUTLETS ||--o{ AUDIT_LOGS : audits_actions
+
+  TENANTS {
+    uuid id PK
+    string name
+    boolean is_active
+    datetime created_at
+  }
+
+  OUTLETS {
+    uuid id PK
+    uuid tenant_id FK
+    string name
+    string address
+    string phone
+    string gstin
+    string fssai
+  }
+
+  USERS {
+    uuid id PK
+    uuid tenant_id FK
+    uuid outlet_id FK
+    string username
+    string role
+    boolean is_active
+  }
+
+  SUBSCRIPTION_PLANS {
+    uuid id PK
+    string plan_code
+    string name
+    numeric price
+    int duration_days
+  }
+
+  SUBSCRIPTIONS {
+    uuid id PK
+    uuid tenant_id FK
+    uuid plan_id FK
+    string status
+    date start_date
+    date end_date
+  }
+
+  SHOP_SETTINGS {
+    uuid id PK
+    uuid outlet_id FK
+    string shop_name
+    string logo_url
+    string upi_id
+    string thermal_printer_size
+  }
+```
+
+#### Multi-Tenant RBAC Hierarchy
+```mermaid
+flowchart TD
+  SuperAdmin[Tenant Owner / Super Admin] --> Branch1[Outlet A: Hatibagan Branch]
+  SuperAdmin --> Branch2[Outlet B: Park Street Branch]
+  
+  Branch1 --> Manager1[Role: ADMIN / Manager]
+  Manager1 --> Cashier1[Role: CASHIER]
+  Manager1 --> Captain1[Role: WAITER]
+  Manager1 --> Chef1[Role: KITCHEN_STAFF]
+
+  Branch2 --> Manager2[Role: ADMIN / Manager]
+  Manager2 --> Cashier2[Role: CASHIER]
+  Manager2 --> Captain2[Role: WAITER]
+  Manager2 --> Chef2[Role: KITCHEN_STAFF]
+```
 
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
