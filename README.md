@@ -64,23 +64,29 @@ $$\text{Line Subtotal} = (\text{Unit Price} \times \text{Quantity}) + \sum_{m=1}
 
 #### B. Order Discount Computation
 - **Percentage Discount:**
-  $$\text{Discount Amount} = \text{Order Subtotal} \times \left(\frac{\text{Discount \%}}{100}\right)$$
+  $$\text{Discount Amount} = \text{Order Subtotal} \times \left(\frac{\text{Discount Rate}}{100}\right)$$
 - **Fixed / Flat Discount:**
   $$\text{Discount Amount} = \min(\text{Order Subtotal}, \text{Flat Discount Value})$$
 
 #### C. Taxable Base & GST (CGST / SGST / IGST)
 $$\text{Taxable Base} = \text{Order Subtotal} - \text{Discount Amount}$$
-$$\text{CGST} = \text{Taxable Base} \times \left(\frac{\text{Tax Rate \%}}{2 \times 100}\right)$$
-$$\text{SGST} = \text{Taxable Base} \times \left(\frac{\text{Tax Rate \%}}{2 \times 100}\right)$$
+
+$$\text{CGST} = \text{Taxable Base} \times \left(\frac{\text{Tax Rate}}{2 \times 100}\right)$$
+
+$$\text{SGST} = \text{Taxable Base} \times \left(\frac{\text{Tax Rate}}{2 \times 100}\right)$$
+
 $$\text{Total Tax} = \text{CGST} + \text{SGST}$$
 
 #### D. Rounding & Grand Total
 $$\text{Raw Total} = \text{Taxable Base} + \text{Total Tax}$$
-$$\text{Grand Total} = \text{round}(\text{Raw Total}, 0)$$
+
+$$\text{Grand Total} = \operatorname{round}(\text{Raw Total}, 0)$$
+
 $$\text{Rounding Adjustment} = \text{Grand Total} - \text{Raw Total}$$
 
 #### E. Cashier Drawer Reconciliation (Shift Closing)
 $$\text{Expected Cash} = \text{Opening Cash Float} + \sum \text{Cash Tender Receipts} - \sum \text{Cash Payouts}$$
+
 $$\text{Cash Variance} = \text{Actual Counted Cash} - \text{Expected Cash}$$
 
 ---
@@ -101,10 +107,14 @@ Manages Kitchen Order Tickets (KOTs), prep station line item routing, and kitche
 
 ### 📐 Mathematical & Routing Logic
 - **KOT Ticket Numbering Sequence:**
-  $$\text{KOT Code} = \text{"KOT-"} + \text{Date}(\text{YYYYMMDD}) + \text{"-"} + \text{PadZero}(\text{Sequence}, 4)$$
-- **Station Split Routing:**
-  Order lines are automatically partitioned by target `prep_station`:
-  $$\text{KOT}_{\text{Station}} = \{ \text{line} \in \text{Order} \mid \text{line.item.prep\_station} = \text{Station} \}$$
+  ```text
+  KOT Code = "KOT-" + Date(YYYYMMDD) + "-" + PadZero(Sequence, 4)
+  Example: KOT-20261120-0001
+  ```
+- **Station Split Routing Logic:**
+  ```text
+  KOT(Station) = { order_line in Order | order_line.item.prep_station == Station }
+  ```
 
 ---
 
@@ -131,6 +141,7 @@ Tracks raw materials, Unit of Measure (UOM) conversions, recipes (Bill of Materi
 
 #### A. UOM Normalization
 $$\text{Normalized Qty} = \text{Input Quantity} \times \text{UOM Conversion Factor}$$
+
 *(e.g., $2.5\text{ KG Chicken} \times 1000 = 2500\text{ G}$)*
 
 #### B. Moving Weighted Average Cost (WAC / MAC)
@@ -142,7 +153,9 @@ $$\text{Plate Cost} = \sum_{i=1}^{n} \left(\frac{\text{Quantity Required}_i}{\te
 
 #### D. Physical Stock Audit Variance
 $$\text{Variance Qty} = \text{Physical Count} - \text{Expected Book Stock}$$
+
 $$\text{Rupee Variance Impact} = \text{Variance Qty} \times \text{WAC Unit Cost}$$
+
 - **Surplus:** $\text{Variance Qty} > 0$
 - **Deficit (Shrinkage):** $\text{Variance Qty} < 0$
 
@@ -180,35 +193,47 @@ Unified multi-branch guest wallet, append-only loyalty points ledger, store cred
 
 #### A. Recency, Frequency, Monetary (RFM) Metrics
 $$\text{Average Order Value (AOV)} = \frac{\text{Total Spend}}{\text{Total Visits}}$$
-- **Segmentation Criteria:**
-  - $\text{VIP} \iff \text{Total Spend} \ge ₹5,000 \lor \text{Total Visits} \ge 10$
-  - $\text{REGULAR} \iff \text{Total Visits} \ge 3$
-  - $\text{NEW} \iff \text{Total Visits} < 3$
-  - $\text{AT\_RISK} \iff (\text{Today} - \text{Last Visit Date}) > 30\text{ days}$
+
+**Segmentation Criteria:**
+- **VIP:** Total Spend $\ge ₹5,000$ or Total Visits $\ge 10$
+- **REGULAR:** Total Visits $\ge 3$
+- **NEW:** Total Visits $< 3$
+- **AT_RISK:** Inactive for $> 30$ days since last visit
 
 #### B. Loyalty Earn & Burn
 $$\text{Points Earned} = \left\lfloor\frac{\text{Order Grand Total}}{\text{Earn Per Rupees}}\right\rfloor$$
-$$\text{Max Allowed Burn (₹)} = \text{Order Grand Total} \times \left(\frac{\text{Max Redeem \%}}{100}\right)$$
+
+$$\text{Max Allowed Burn} = \text{Order Grand Total} \times \left(\frac{\text{Max Redeem Pct}}{100}\right)$$
 
 #### C. Theoretical vs. Actual COGS (Food Cost Variance)
 $$\text{Theoretical COGS} = \sum (\text{KOT Deducted Recipe Qty} \times \text{WAC at Time})$$
-$$\text{Actual COGS} = \text{Theoretical COGS} + \text{Logged Wastage Loss (₹)} + \text{Physical Audit Deficit (₹)}$$
-$$\text{Unexplained Variance (₹)} = \text{Actual COGS} - \text{Theoretical COGS}$$
-$$\text{Variance \% of Sales} = \left(\frac{\text{Unexplained Variance}}{\text{Total Food Sales}}\right) \times 100$$
+
+$$\text{Actual COGS} = \text{Theoretical COGS} + \text{Logged Wastage Loss} + \text{Physical Audit Deficit}$$
+
+$$\text{Unexplained Variance} = \text{Actual COGS} - \text{Theoretical COGS}$$
+
+$$\text{Variance Pct of Sales} = \left(\frac{\text{Unexplained Variance}}{\text{Total Food Sales}}\right) \times 100$$
 
 #### D. Menu Engineering BCG Matrix Classification
 For every menu item $j$:
 $$\text{Gross Margin}_j = \text{Selling Price}_j - \text{Plate Cost}_j$$
-$$\text{Food Cost \%}_j = \left(\frac{\text{Plate Cost}_j}{\text{Selling Price}_j}\right) \times 100 \quad (\text{Alert if } > 35\%)$$
+
+$$\text{Food Cost Pct}_j = \left(\frac{\text{Plate Cost}_j}{\text{Selling Price}_j}\right) \times 100 \quad (\text{Alert if } > 35\%)$$
+
 Thresholds:
 $$\overline{\text{Margin}} = \frac{\sum \text{Total Margin}}{\sum \text{Total Qty Sold}}, \quad \overline{\text{Popularity}} = \frac{\sum \text{Total Qty Sold}}{\text{Number of Unique Menu Items}}$$
 
-| Quadrant | Condition | Menu Action Strategy |
-| :--- | :--- | :--- |
-| ⭐ **STAR** | $\text{Qty} \ge \overline{\text{Popularity}}$ and $\text{Margin} \ge \overline{\text{Margin}}$ | Maintain quality; prime menu placement |
-| 🐴 **PLOWHORSE** | $\text{Qty} \ge \overline{\text{Popularity}}$ and $\text{Margin} < \overline{\text{Margin}}$ | Repackage, reduce portion, or increase price slightly |
-| 🧩 **PUZZLE** | $\text{Qty} < \overline{\text{Popularity}}$ and $\text{Margin} \ge \overline{\text{Margin}}$ | Upsell, feature on specials board, run promotions |
-| 🐕 **DOG** | $\text{Qty} < \overline{\text{Popularity}}$ and $\text{Margin} < \overline{\text{Margin}}$ | Re-engineer recipe or eliminate from menu |
+| Quadrant | Volume Condition | Margin Condition | Menu Action Strategy |
+| :--- | :--- | :--- | :--- |
+| ⭐ **STAR** | $\text{Qty} \ge \overline{\text{Popularity}}$ | $\text{Margin} \ge \overline{\text{Margin}}$ | Maintain high quality; prime menu placement |
+| 🐴 **PLOWHORSE** | $\text{Qty} \ge \overline{\text{Popularity}}$ | $\text{Margin} < \overline{\text{Margin}}$ | Repackage, adjust portions, or re-engineer cost |
+| 🧩 **PUZZLE** | $\text{Qty} < \overline{\text{Popularity}}$ | $\text{Margin} \ge \overline{\text{Margin}}$ | Upsell, feature on specials board, run promotions |
+| 🐕 **DOG** | $\text{Qty} < \overline{\text{Popularity}}$ | $\text{Margin} < \overline{\text{Margin}}$ | Re-engineer recipe or consider eliminating |
+
+#### E. Stock Movement Balance Equation
+$$\text{Closing Stock} = \text{Opening} + \text{GRN In} + \text{Net Transfers} - \text{KOT Sold} - \text{Wastage} + \text{Audit Adjust}$$
+
+$$\text{Closing Valuation} = \text{Closing Stock} \times \text{Cost per Unit}$$
 
 ---
 
@@ -257,11 +282,18 @@ Role-based access control, tenant branch management, legal configuration, dynami
 
 #### A. Dynamic Bharat UPI QR Code Spec
 Embedded in customer thermal receipts for immediate cashierless UPI scanning:
-$$\text{URI} = \text{"upi://pay?pa="} + \text{UPI\_ID} + \text{"\&pn="} + \text{URL\_ENCODE}(\text{Store Name}) + \text{"\&am="} + \text{Grand Total} + \text{"\&cu=INR\&tn="} + \text{Order Number}$$
+```text
+upi://pay?pa={UPI_ID}&pn={URL_ENCODED_SHOP_NAME}&am={GRAND_TOTAL}&cu=INR&tn={ORDER_NUMBER}
+```
 
 #### B. Subscription Expiry & Grace Window
 $$\text{Days Remaining} = \text{End Date} - \text{Current Date}$$
-$$\text{Status} = \begin{cases} \text{ACTIVE} & \text{if } \text{Days Remaining} > 0 \\ \text{GRACE\_PERIOD} & \text{if } -3 \le \text{Days Remaining} \le 0 \\ \text{EXPIRED} & \text{if } \text{Days Remaining} < -3 \end{cases}$$
+
+$$\text{Status} = \begin{cases} 
+\text{ACTIVE} & \text{if } \text{Days Remaining} > 0 \\ 
+\text{GRACE-PERIOD} & \text{if } -3 \le \text{Days Remaining} \le 0 \\ 
+\text{EXPIRED} & \text{if } \text{Days Remaining} < -3 
+\end{cases}$$
 
 ---
 
