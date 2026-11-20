@@ -1,23 +1,24 @@
 # SirfBill Backend (Restaurant Edition)
 
-A high-performance, multi-tenant, enterprise-grade restaurant management backend engineered with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**, and **Pydantic**. Built specifically for **Fine Dine, Cafes, Quick Service Restaurants (QSR), Cloud Kitchens, Bars, and Multi-Branch Restaurant Chains**.
+A high-performance, multi-tenant, enterprise-grade restaurant management backend engineered with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**, and **Pydantic**. Built specifically for **Fine Dine, Cafes, Quick Service Restaurants (QSR), Cloud Kitchens, Bars, and Multi-Branch Chains**.
 
 ---
 
-## 🏗️ Architecture & Tech Stack
+## 🏗️ Architecture & Technology Stack
 
-- **Framework:** FastAPI (Python 3.11+) with Async routing
-- **Database:** PostgreSQL 15+ (Multi-Tenant with tenant-isolated row scoping)
+- **Framework:** FastAPI (Python 3.11+) with Async / ThreadPool worker pooling
+- **Database:** PostgreSQL 15+ (Multi-Tenant architecture with tenant and outlet-level row isolation)
 - **ORM & Migrations:** SQLAlchemy 2.0 & Alembic (Latest migration: `f2d4b6a8c0e2`)
 - **Thermal Print Engine:** Jinja2 + ReportLab (58mm & 80mm ESC/POS compatible thermal receipt and KOT generators)
-- **Authentication & Security:** JWT (JSON Web Tokens), Password Hashing (Bcrypt), RBAC (`ADMIN`, `CASHIER`, `WAITER`, `KITCHEN_STAFF`), and SMS OTP
-- **Containerization:** Docker & Docker Compose (Portainer / Production Ready)
+- **Concurrency & Integrity:** Optimistic Version Locking (`order.version += 1`), Row-Level Locks (`SELECT ... FOR UPDATE`), and Append-Only Financial Ledgers
+- **Authentication & Security:** JWT (JSON Web Tokens), Bcrypt password hashing, Role-Based Access Control (`ADMIN`, `CASHIER`, `WAITER`, `KITCHEN_STAFF`), and SMS OTP
+- **Containerization:** Docker & Docker Compose (Portainer & Cloud Deploy ready)
 
 ---
 
-## 🏛️ The 6 Core Modules
+## 🏛️ System Architecture & Data Flow
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        SirfBill Restaurant Platform                    │
 └────────────────────────────────────────────────────────────────────────┘
@@ -40,6 +41,13 @@ A high-performance, multi-tenant, enterprise-grade restaurant management backend
 ## 1. 🧾 Restaurant POS Module
 
 Handles real-time table billing, counter takeaway sales, delivery orders, tender settlements, and thermal receipt generation.
+
+### 🔄 Order Lifecycle State Machine
+```text
+[ DRAFT ] ────────► [ OPEN ] ────────► [ SENT_TO_KITCHEN ] ────────► [ READY ] ────────► [ SERVED ] ────────► [ COMPLETED ]
+   │                   │                      │                         │                   │                    ▲
+   └───────────────────┴──────────────────────┴─────────────────────────┴───────────────────┴────── (Cancel) ────┘
+```
 
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
@@ -77,10 +85,10 @@ $$\text{SGST} = \text{Taxable Base} \times \left(\frac{\text{Tax Rate}}{2 \times
 
 $$\text{Total Tax} = \text{CGST} + \text{SGST}$$
 
-#### D. Rounding & Grand Total
+#### D. Rounding & Grand Total (50-Paisa Banking Round)
 $$\text{Raw Total} = \text{Taxable Base} + \text{Total Tax}$$
 
-$$\text{Grand Total} = \operatorname{round}(\text{Raw Total}, 0)$$
+$$\text{Grand Total} = \text{round}(\text{Raw Total}, 0)$$
 
 $$\text{Rounding Adjustment} = \text{Grand Total} - \text{Raw Total}$$
 
@@ -93,7 +101,7 @@ $$\text{Cash Variance} = \text{Actual Counted Cash} - \text{Expected Cash}$$
 
 ## 2. 🍳 Kitchen Display System (KDS) & KOT Module
 
-Manages Kitchen Order Tickets (KOTs), prep station line item routing, and kitchen status updates.
+Manages Kitchen Order Tickets (KOTs), prep station line item routing, and item-level kitchen cooking transitions.
 
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
@@ -106,9 +114,9 @@ Manages Kitchen Order Tickets (KOTs), prep station line item routing, and kitche
 | `GET` | `/api/restaurant/kitchen/stations` | List configured prep stations (*Main Kitchen, Tandoor, Bar, Pantry, Desserts*) |
 
 ### 📐 Mathematical & Routing Logic
-- **KOT Ticket Numbering Sequence:**
+- **KOT Ticket Sequence:**
   ```text
-  KOT Code = "KOT-" + Date(YYYYMMDD) + "-" + PadZero(Sequence, 4)
+  KOT Code = "KOT-" + Date(YYYYMMDD) + "-" + PadZero(Daily_Sequence, 4)
   Example: KOT-20261120-0001
   ```
 - **Station Split Routing Logic:**
@@ -145,7 +153,7 @@ $$\text{Normalized Qty} = \text{Input Quantity} \times \text{UOM Conversion Fact
 *(e.g., $2.5\text{ KG Chicken} \times 1000 = 2500\text{ G}$)*
 
 #### B. Moving Weighted Average Cost (WAC / MAC)
-When new stock enters via GRN:
+When new stock enters via inward GRN:
 $$\text{New WAC} = \frac{(\text{Current Qty} \times \text{Old WAC}) + (\text{GRN Qty} \times \text{GRN Purchase Price})}{\text{Current Qty} + \text{GRN Qty}}$$
 
 #### C. Recipe Bill of Materials (BOM) Plate Cost
@@ -194,16 +202,16 @@ Unified multi-branch guest wallet, append-only loyalty points ledger, store cred
 #### A. Recency, Frequency, Monetary (RFM) Metrics
 $$\text{Average Order Value (AOV)} = \frac{\text{Total Spend}}{\text{Total Visits}}$$
 
-**Segmentation Criteria:**
-- **VIP:** Total Spend $\ge ₹5,000$ or Total Visits $\ge 10$
+**Segmentation Thresholds:**
+- **VIP:** Total Lifetime Spend $\ge ₹5,000$ or Total Visits $\ge 10$
 - **REGULAR:** Total Visits $\ge 3$
 - **NEW:** Total Visits $< 3$
-- **AT_RISK:** Inactive for $> 30$ days since last visit
+- **AT_RISK:** Inactive for $> 30$ days since last dining visit
 
-#### B. Loyalty Earn & Burn
+#### B. Loyalty Points Accrual & Redemption
 $$\text{Points Earned} = \left\lfloor\frac{\text{Order Grand Total}}{\text{Earn Per Rupees}}\right\rfloor$$
 
-$$\text{Max Allowed Burn} = \text{Order Grand Total} \times \left(\frac{\text{Max Redeem Pct}}{100}\right)$$
+$$\text{Max Allowed Burn (₹)} = \text{Order Grand Total} \times \left(\frac{\text{Max Redeem Pct}}{100}\right)$$
 
 #### C. Theoretical vs. Actual COGS (Food Cost Variance)
 $$\text{Theoretical COGS} = \sum (\text{KOT Deducted Recipe Qty} \times \text{WAC at Time})$$
@@ -289,11 +297,62 @@ upi://pay?pa={UPI_ID}&pn={URL_ENCODED_SHOP_NAME}&am={GRAND_TOTAL}&cu=INR&tn={ORD
 #### B. Subscription Expiry & Grace Window
 $$\text{Days Remaining} = \text{End Date} - \text{Current Date}$$
 
-$$\text{Status} = \begin{cases} 
-\text{ACTIVE} & \text{if } \text{Days Remaining} > 0 \\ 
-\text{GRACE-PERIOD} & \text{if } -3 \le \text{Days Remaining} \le 0 \\ 
-\text{EXPIRED} & \text{if } \text{Days Remaining} < -3 
-\end{cases}$$
+- **ACTIVE:** $\text{Days Remaining} > 0$
+- **GRACE-PERIOD:** $-3 \le \text{Days Remaining} \le 0$
+- **EXPIRED:** $\text{Days Remaining} < -3$
+
+---
+
+## 🖨️ Thermal Receipt Printing Specification (80mm & 58mm)
+
+The print engine produces pixel-accurate PDF outputs designed for ESC/POS direct printing:
+
+```text
++--------------------------------------------------------+
+|                      [RESTAURANT LOGO]                 |
+|            KARIM'S - ORIGINAL FROM JAMA MASJID          |
+|    84, Aurobindo Sarani, Hatibagan, Kolkata - 700005   |
+|                 GSTIN: 29AAACH7409R1ZX                 |
+|                 FSSAI: 21521175000745                  |
++--------------------------------------------------------+
+| Bill No: ORD-20261120-0003                 Table: T2   |
+| Type: DINE-IN             Date: 12:38 PM - 20/11/2026  |
+| Customer: Walk-In Guest                                |
++--------------------------------------------------------+
+| ITEM                    QTY         RATE         TOTAL |
+| Chicken Tikka Biryani     1       360.00        360.00 |
+| Mutton Handi Biryani      1       450.00        450.00 |
++--------------------------------------------------------+
+| Total Qty: 2                                           |
+| Subtotal:                              Rs.      810.00 |
+| CGST (2.5%):                           Rs.       20.25 |
+| SGST (2.5%):                           Rs.       20.25 |
+| RoundOff:                              Rs.       -0.50 |
+|--------------------------------------------------------|
+| TOTAL INVOICE BILL:                    Rs.      850.00 |
+| PAID AMOUNT:                           Rs.      850.00 |
++--------------------------------------------------------+
+|                 [DYNAMIC BHARAT UPI QR]                |
+|               Scan to Pay via Any UPI App              |
+|                                                        |
+|               THANK YOU FOR DINING WITH US!            |
+|                     Please visit again                 |
+|                          SirfBill                      |
+|             Powered by Naiyo24 Pvt. Ltd.               |
++--------------------------------------------------------+
+```
+
+---
+
+## 🔒 Concurrency Control & Database Integrity
+
+1. **Optimistic Version Locking:**
+   - Every `RestaurantOrder` maintains a `version: int` column.
+   - When amending or settling orders, concurrent writes from multiple cashier stations or waiter tablets are evaluated against `order.version == current_version`. Mismatched versions raise HTTP `409 Conflict` to prevent overwriting.
+2. **Row-Level Transaction Locking:**
+   - Ingredient deduction on KOT dispatch and Khata settlements use `SELECT ... FOR UPDATE` to ensure stock quantities and store credit balances never drift under heavy concurrency.
+3. **Idempotency Enforcement:**
+   - Financial transactions (`RestaurantTender`, `RestaurantCustomerCreditLedger`, `RestaurantLoyaltyLedger`) enforce unique `idempotency_key` constraints to eliminate duplicate billing on network re-transmissions.
 
 ---
 
