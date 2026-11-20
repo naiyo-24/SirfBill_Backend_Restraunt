@@ -1,9 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/sirfbill_logo.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/sirfbill_logo_dark.png">
-    <img alt="SirfBill Logo" src="assets/sirfbill_logo.png" width="320">
-  </picture>
+  <img src="assets/sirfbill_logo.png" alt="SirfBill Logo" width="320">
 </p>
 
 <h1 align="center">SirfBill Restaurant Platform (FastAPI Backend)</h1>
