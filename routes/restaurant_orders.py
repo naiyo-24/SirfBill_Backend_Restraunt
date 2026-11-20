@@ -261,6 +261,10 @@ def get_orders(
     target_outlet_id = outlet_id
     if not target_outlet_id and current_user and current_user.outlet_id:
         target_outlet_id = current_user.outlet_id
+    if not target_outlet_id:
+        first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
+        if first_outlet:
+            target_outlet_id = first_outlet.id
 
     query = (
         db.query(RestaurantOrder)
@@ -301,7 +305,7 @@ def get_active_order_by_table(
         db.query(RestaurantOrder)
         .options(joinedload(RestaurantOrder.lines))
         .filter(RestaurantOrder.table_id == table_id)
-        .filter(RestaurantOrder.status.in_(["OPEN", "SENT_TO_KITCHEN", "HOLD", "SERVED"]))
+        .filter(RestaurantOrder.status.in_(["OPEN", "SENT_TO_KITCHEN", "HOLD", "READY", "SERVED"]))
         .order_by(RestaurantOrder.created_at.desc())
         .first()
     )
