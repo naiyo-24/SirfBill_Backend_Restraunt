@@ -1,40 +1,241 @@
-# SirfBill Backend (Restaurant Edition)
+# SirfBill Restaurant Platform (FastAPI Backend)
 
-A high-performance, multi-tenant, enterprise-grade restaurant management backend engineered with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**, and **Pydantic**. Built specifically for **Fine Dine, Cafes, Quick Service Restaurants (QSR), Cloud Kitchens, Bars, and Multi-Branch Chains**.
-
----
-
-## 🏗️ Architecture & Technology Stack
-
-- **Framework:** FastAPI (Python 3.11+) with Async / ThreadPool worker pooling
-- **Database:** PostgreSQL 15+ (Multi-Tenant architecture with tenant and outlet-level row isolation)
-- **ORM & Migrations:** SQLAlchemy 2.0 & Alembic (Latest migration: `f2d4b6a8c0e2`)
-- **Thermal Print Engine:** Jinja2 + ReportLab (58mm & 80mm ESC/POS compatible thermal receipt and KOT generators)
-- **Concurrency & Integrity:** Optimistic Version Locking (`order.version += 1`), Row-Level Locks (`SELECT ... FOR UPDATE`), and Append-Only Financial Ledgers
-- **Authentication & Security:** JWT (JSON Web Tokens), Bcrypt password hashing, Role-Based Access Control (`ADMIN`, `CASHIER`, `WAITER`, `KITCHEN_STAFF`), and SMS OTP
-- **Containerization:** Docker & Docker Compose (Portainer & Cloud Deploy ready)
+A high-performance, multi-tenant, enterprise-grade restaurant management backend engineered with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**, and **Pydantic**. Built specifically for **Fine Dine, Cafes, Quick Service Restaurants (QSR), Cloud Kitchens, Bars, and Multi-Branch Restaurant Chains**.
 
 ---
 
-## 🏛️ System Architecture & Data Flow
+## 📂 Repo Layout
 
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                        SirfBill Restaurant Platform                    │
-└────────────────────────────────────────────────────────────────────────┘
-     │                    │                   │                     │
-┌────▼─────────────┐ ┌────▼──────────┐ ┌──────▼───────────┐ ┌───────▼────────────┐
-│ 1. Restaurant    │ │ 2. Kitchen    │ │ 3. Restaurant    │ │ 4. CRM & Executive │
-│    POS Module    │ │    Module     │ │    Inventory     │ │    Reports Module  │
-│ (Order & Tenders)│ │ (KDS & KOT)   │ │ (Recipes & Stock)│ │ (RFM, Ledgers & BCG│
-└──────────────────┘ └───────────────┘ └──────────────────┘ └────────────────────┘
-     │                                                              │
-┌────▼─────────────┐                                           ┌────▼────────────┐
-│ 5. Captain/Waiter│                                           │ 6. Admin & Multi│
-│    Module        │                                           │    Tenant Module│
-│ (Floor & Tables) │                                           │ (RBAC, Sub, Pay)│
-└──────────────────┘                                           └─────────────────┘
+.
+├── main.py                     # FastAPI application entry point, middleware & router aggregation
+├── dependencies.py             # Auth verification, JWT extraction, and database session injection
+├── Dockerfile                  # Production container build (Alembic migrations + Uvicorn server)
+├── docker-compose.yml          # Multi-container orchestration (PostgreSQL + Backend + pgAdmin)
+├── requirements.txt            # Python dependencies
+├── alembic.ini                 # Database migration configuration
+├── .env                        # Environment configurations (Database, Secrets, Port, Keys)
+│
+├── alembic/                    # Database migrations
+│   ├── env.py                  # Alembic runtime environment
+│   └── versions/               # Schema version migration history (Latest: f2d4b6a8c0e2)
+│
+├── models/                     # SQLAlchemy ORM Models (Tenant-isolated schema)
+│   ├── database.py             # Engine, SessionLocal, and Declarative Base
+│   ├── user.py                 # Users & Staff with RBAC roles
+│   ├── restaurant_outlet.py    # Outlets / Branches under master tenant
+│   ├── restaurant_table.py     # Dining tables, sections, and live status
+│   ├── restaurant_menu.py      # Categories & Menu items with stations and pricing
+│   ├── restaurant_modifier.py  # Menu modifiers and add-on options
+│   ├── restaurant_order.py     # Order headers with concurrency versioning
+│   ├── restaurant_order_line.py# Order cart line items with prep instructions
+│   ├── restaurant_kitchen.py   # Kitchen Order Tickets (KOT) & prep stations
+│   ├── restaurant_tender.py    # Payment tenders (Cash, UPI, Card, Khata)
+│   ├── restaurant_shift.py     # Cashier shifts, cash drawers, and reconciliation
+│   ├── restaurant_ingredient.py# Raw ingredients, categories, and storage zones
+│   ├── restaurant_recipe.py    # Bill of Materials (BOM) & ingredient recipes
+│   ├── restaurant_stock_ledger.py # Append-only inventory stock ledger
+│   ├── restaurant_stock_audit.py  # Physical stock audit batches & count items
+│   ├── restaurant_stock_transfer.py# Inter-branch stock transfers
+│   ├── restaurant_procurement.py  # Suppliers, Purchase Orders, and Goods Received Notes (GRN)
+│   ├── restaurant_customer.py  # CRM guest master, loyalty rules, Khata, and notifications
+│   ├── restaurant_subscription.py# Multi-tenant licensing plans & subscription status
+│   ├── shop_settings.py        # Brand settings, GSTIN, FSSAI, logo, and UPI IDs
+│   └── restaurant_audit.py     # POS audit trail (voids, overrides, reprints, refunds)
+│
+├── routes/                     # REST API Routers
+│   ├── auth.py                 # Staff authentication, password verification, and JWT issuance
+│   ├── user.py                 # Staff directory and role management (Admin)
+│   ├── restaurant_outlets.py   # Multi-branch management endpoints
+│   ├── restaurant_tables.py    # Floor plans, seating, and table state machine
+│   ├── restaurant_menu.py      # Categories and menu item CRUD
+│   ├── restaurant_orders.py    # POS order creation, table binding, cart, and settlement
+│   ├── restaurant_kitchen.py   # KOT generation, station routing, and kitchen status
+│   ├── restaurant_tenders.py   # Mixed/split payment settlements and thermal receipt generation
+│   ├── restaurant_shifts.py    # Cashier drawer open/close and X/Z shift handover
+│   ├── restaurant_inventory.py # Inventory items, recipes, stock ledger, and physical count audits
+│   ├── restaurant_stock_transfer.py # Inter-branch stock transfers
+│   ├── restaurant_procurement.py# Purchase orders and inward GRN processing
+│   ├── restaurant_crm.py       # Customer directory, RFM insights, loyalty earn/burn, and Khata
+│   ├── restaurant_reports.py   # Sales reports and the 5 Executive Financial Costing reports
+│   ├── restaurant_subscriptions.py # Platform licensing, subscription status, and renewals
+│   └── shop_settings.py        # Outlet brand profile, legal details, and bill settings
+│
+├── schemas/                    # Pydantic Schemas (Request/Response validation)
+│   ├── restaurant_order.py     # Order & cart line validation schemas
+│   ├── restaurant_menu.py      # Menu & category validation schemas
+│   ├── restaurant_table.py     # Dining table validation schemas
+│   ├── restaurant_kitchen.py   # KOT ticket schemas
+│   ├── restaurant_tender.py    # Payment tender and split settlement schemas
+│   ├── restaurant_crm.py       # Customer, loyalty, Khata, and notification schemas
+│   ├── restaurant_reports.py   # 5 Executive Reports & Sales response models
+│   └── shop_settings.py        # Store settings validation schemas
+│
+├── utils/                      # External helpers & utilities
+│   ├── restaurant_thermal_printer.py # 80mm & 58mm thermal receipt and KOT PDF engine
+│   ├── pdf_generator.py        # General report PDF generator
+│   └── timezone.py             # UTC & local timezone normalization helpers
+│
+├── templates/                  # Thermal Receipt HTML & Jinja2 Templates
+│   └── thermal_bill_template.html # High-fidelity thermal bill template with UPI QR
+│
+└── uploads/                    # Persistent storage for uploaded media & receipts
+    ├── shop/                   # Restaurant logos and payment QR images
+    ├── bills/                  # Generated thermal customer bill PDFs
+    └── kots/                   # Kitchen ticket print PDFs
 ```
+
+---
+
+## 🏛️ High-Level Architecture
+
+### Architectural Components
+- **FastAPI Core**: Request dispatching, dependency injection, and automatic OpenAPI documentation.
+- **Tenant Isolation**: Every database table is indexed by `tenant_id` (and branch `outlet_id`) ensuring strict tenant isolation across all operations.
+- **Concurrency & Locking**: Optimistic version locking on orders (`order.version += 1`) and row-level pessimistic locking (`SELECT ... FOR UPDATE`) on raw ingredient inventory and store credit balances.
+- **Append-Only Accounting**: Loyalty points (`RestaurantLoyaltyLedger`), Store Credit Khata (`RestaurantCustomerCreditLedger`), and Stock movements (`RestaurantStockLedger`) are strictly append-only. Balances are never modified in place without an immutable ledger audit trail.
+
+### Request Flow (HTTP)
+
+```mermaid
+flowchart LR
+  Client[Mobile / Web POS Client]
+  API[FastAPI Router: main.py]
+  Auth[Depends: get_restaurant_staff]
+  Session[Depends: get_db]
+  Service[Business / Costing Pipeline]
+  DB[(PostgreSQL 15)]
+
+  Client -->|HTTP Request with Bearer JWT| API
+  API --> Auth
+  Auth -->|Validate JWT Token & Outlet Scoping| Session
+  Session --> Service
+  Service -->|Pessimistic / Optimistic Query| DB
+  DB -->|Committed State| Service
+  Service -->|Pydantic Response Model| Client
+```
+
+---
+
+## ⚠️ Runtime Constraints & Critical Gotchas
+
+1. **PostgreSQL Environment Variables Are Mandatory**
+   - The application relies on `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`. Missing variables will cause database initialization to halt.
+2. **Optimistic Version Locking on Orders**
+   - Every `RestaurantOrder` maintains a `version: int` column. Any concurrent modification from multiple cashier terminals or waiter tablets evaluates `order.version == current_version`. Mismatched versions raise `409 Conflict` to prevent silent overwriting.
+3. **Atomic Stock Deduction on Kitchen Dispatch**
+   - Recipe ingredients are deducted atomically upon KOT dispatch (`POST /api/restaurant/kitchen/orders/{order_id}/send-kot`) or direct counter settlement. Stock balances use `SELECT ... FOR UPDATE` row locks to prevent race conditions.
+4. **Append-Only Financial Ledgers**
+   - Never update `loyalty_points`, `credit_balance`, or `current_stock` without writing a corresponding ledger row (`RestaurantLoyaltyLedger`, `RestaurantCustomerCreditLedger`, `RestaurantStockLedger`). Every ledger row requires an `idempotency_key` to avoid duplicate entries during network retries.
+5. **Thermal Print Engine & Static Mounts**
+   - Generated PDF receipts and KOTs are stored under `uploads/bills/` and `uploads/kots/`. Static files are mounted at `/uploads`.
+
+---
+
+## ⚙️ Environment Variables
+
+### Required (Database)
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `DB_HOST` | PostgreSQL Host Address | `localhost` |
+| `DB_PORT` | PostgreSQL Port | `5432` |
+| `DB_USER` | PostgreSQL Username | `postgres` |
+| `DB_PASSWORD` | PostgreSQL Password | *(Required)* |
+| `DB_NAME` | PostgreSQL Database Name | `sirfbill_restaurant` |
+
+### Optional (Security & Integrations)
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `JWT_SECRET` | Secret key for signing JWT tokens | *(Required in prod)* |
+| `ALGORITHM` | JWT signing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token validity duration | `1440` (24 Hours) |
+| `APITXT_AUTH_KEY` | Fast2SMS / SMS Gateway Key | *(Optional)* |
+| `RAZORPAY_KEY_ID` | Razorpay Key for License Subscriptions | *(Optional)* |
+| `RAZORPAY_KEY_SECRET` | Razorpay Secret for Signature Verification | *(Optional)* |
+
+---
+
+## 🗄️ Database Models & Entity Relationship Diagram (ERD)
+
+```mermaid
+erDiagram
+  TENANTS ||--o{ OUTLETS : owns
+  OUTLETS ||--o{ USERS : employs
+  OUTLETS ||--o{ TABLES : contains
+  OUTLETS ||--o{ MENU_ITEMS : serves
+  OUTLETS ||--o{ ORDERS : processes
+  OUTLETS ||--o{ INGREDIENTS : stocks
+  OUTLETS ||--o{ CUSTOMERS : registers
+
+  TABLES ||--o{ ORDERS : seats
+  ORDERS ||--o{ ORDER_LINES : contains
+  ORDERS ||--o{ KITCHEN_KOTS : generates
+  ORDERS ||--o{ TENDERS : settles
+
+  MENU_ITEMS ||--o{ ORDER_LINES : ordered_as
+  MENU_ITEMS ||--o{ RECIPES : defined_by
+  RECIPES ||--o{ RECIPE_LINES : requires
+  INGREDIENTS ||--o{ RECIPE_LINES : used_in
+  INGREDIENTS ||--o{ STOCK_LEDGER : tracks_movement
+
+  CUSTOMERS ||--o{ ORDERS : places
+  CUSTOMERS ||--o{ LOYALTY_LEDGER : earns_burns
+  CUSTOMERS ||--o{ CREDIT_LEDGER : khata_tab
+  CUSTOMERS ||--o{ CRM_NOTIFICATIONS : receives
+
+  ORDERS {
+    uuid id PK
+    uuid outlet_id FK
+    uuid table_id FK
+    uuid customer_id FK
+    string order_number
+    string order_type
+    string status
+    numeric grand_total
+    int version
+  }
+
+  ORDER_LINES {
+    uuid id PK
+    uuid order_id FK
+    uuid item_id FK
+    string item_name
+    int quantity
+    numeric line_total
+    string kot_status
+  }
+
+  INGREDIENTS {
+    uuid id PK
+    uuid outlet_id FK
+    string name
+    string unit
+    numeric current_stock
+    numeric cost_per_unit
+  }
+
+  RECIPES {
+    uuid id PK
+    uuid item_id FK
+    string variant_name
+    numeric yield_servings
+  }
+
+  CUSTOMERS {
+    uuid id PK
+    uuid outlet_id FK
+    string phone
+    string name
+    int total_visits
+    numeric total_spent
+    int loyalty_points
+    numeric credit_balance
+  }
+```
+
+---
+
+## 🏛️ The 6 Core Modules
 
 ---
 
@@ -42,11 +243,23 @@ A high-performance, multi-tenant, enterprise-grade restaurant management backend
 
 Handles real-time table billing, counter takeaway sales, delivery orders, tender settlements, and thermal receipt generation.
 
-### 🔄 Order Lifecycle State Machine
-```text
-[ DRAFT ] ────────► [ OPEN ] ────────► [ SENT_TO_KITCHEN ] ────────► [ READY ] ────────► [ SERVED ] ────────► [ COMPLETED ]
-   │                   │                      │                         │                   │                    ▲
-   └───────────────────┴──────────────────────┴─────────────────────────┴───────────────────┴────── (Cancel) ────┘
+### 🔄 Order Settlement Sequence Flow
+```mermaid
+sequenceDiagram
+  participant Cashier as POS Cashier / Waiter
+  participant API as FastAPI Backend
+  participant DB as PostgreSQL
+  participant Thermal as Thermal Printer Engine
+
+  Cashier->>API: POST /api/restaurant/orders/{id}/settle {method: CASH, amount: 850}
+  API->>DB: Begin Atomic Transaction
+  API->>DB: Update order status to COMPLETED, verify version lock
+  API->>DB: Record RestaurantTender entry
+  API->>DB: Free Dining Table (status = VACANT)
+  API->>DB: Trigger CRM Pipeline (Update RFM, Credit Points, Debit Khata)
+  API->>DB: Commit Transaction
+  API->>Thermal: Render 80mm Jinja2 template to PDF with Dynamic UPI QR
+  API-->>Cashier: Return 200 OK with Bill PDF Download URL
 ```
 
 ### 🔌 API Endpoints
@@ -101,7 +314,7 @@ $$\text{Cash Variance} = \text{Actual Counted Cash} - \text{Expected Cash}$$
 
 ## 2. 🍳 Kitchen Display System (KDS) & KOT Module
 
-Manages Kitchen Order Tickets (KOTs), prep station line item routing, and item-level kitchen cooking transitions.
+Manages Kitchen Order Tickets (KOTs), prep station line item routing, and kitchen cooking transitions.
 
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
