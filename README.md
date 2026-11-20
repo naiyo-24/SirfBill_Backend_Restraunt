@@ -1,4 +1,22 @@
-# SirfBill Restaurant Platform (FastAPI Backend)
+<p align="center">
+  <img src="assets/sirfbill_logo.png" alt="SirfBill Logo" width="280">
+</p>
+
+<h1 align="center">SirfBill Restaurant Platform (FastAPI Backend)</h1>
+
+<p align="center">
+  <strong>Enterprise Multi-Tenant POS, Kitchen Display System (KDS), Inventory, CRM &amp; Financial Costing Engine</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi" alt="FastAPI">
+  <img src="https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/SQLAlchemy_2.0-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white" alt="SQLAlchemy">
+  <img src="https://img.shields.io/badge/Python_3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+</p>
+
+---
 
 A high-performance, multi-tenant, enterprise-grade restaurant management backend engineered with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**, and **Pydantic**. Built specifically for **Fine Dine, Cafes, Quick Service Restaurants (QSR), Cloud Kitchens, Bars, and Multi-Branch Restaurant Chains**.
 
