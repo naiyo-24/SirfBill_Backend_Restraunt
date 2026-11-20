@@ -233,6 +233,16 @@ def checkout_split_tenders(
             table.status = "CLEANING"
 
     db.commit()
+
+    # CRM Settlement Pipeline
+    try:
+        from routes.restaurant_crm import process_order_settlement_crm
+        khata_amt = sum(Decimal(str(t.amount)) for t in tender_list if t.method.upper() in ("KHATA", "CREDIT", "STORE_CREDIT"))
+        process_order_settlement_crm(db=db, order=order, khata_amount=khata_amt)
+        db.commit()
+    except Exception as e:
+        print(f"Error in CRM settlement processing: {e}")
+
     for t in created_tenders:
         db.refresh(t)
     return created_tenders

@@ -1269,6 +1269,15 @@ def settle_order(
     db.commit()
     db.refresh(order)
 
+    # CRM Settlement Pipeline (RFM update, Loyalty earn, Khata tab, Receipt notification)
+    try:
+        from routes.restaurant_crm import process_order_settlement_crm
+        khata_amt = settled_amount if pay_method in ("KHATA", "CREDIT", "STORE_CREDIT") else Decimal("0.00")
+        process_order_settlement_crm(db=db, order=order, khata_amount=khata_amt)
+        db.commit()
+    except Exception as e:
+        print(f"Error in CRM settlement processing: {e}")
+
     # Generate thermal bill PDF and save to uploads/bills/
     table_name = "Takeaway"
     if order.table_id:
