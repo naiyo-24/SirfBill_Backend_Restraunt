@@ -1,236 +1,288 @@
 # SirfBill Backend (Restaurant Edition)
 
-A high-performance, multi-tenant, production-ready backend API tailored for **Restaurants, Cafes, Quick Service Restaurants (QSR), Cloud Kitchens, Bars, and Fine Dining Outlets**. Engineered with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**, and **Pydantic**.
+A high-performance, multi-tenant, enterprise-grade restaurant management backend engineered with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**, and **Pydantic**. Built specifically for **Fine Dine, Cafes, Quick Service Restaurants (QSR), Cloud Kitchens, Bars, and Multi-Branch Restaurant Chains**.
 
 ---
 
-## 🚀 Tech Stack
+## 🏗️ Architecture & Tech Stack
 
-- **Framework:** [FastAPI](https://fastapi.tiangolo.com/) (Python 3.11+)
-- **Database:** [PostgreSQL 15](https://www.postgresql.org/)
-- **ORM & Migrations:** [SQLAlchemy 2.0](https://www.sqlalchemy.org/) & [Alembic](https://alembic.sqlalchemy.org/)
-- **Receipt & Thermal Engine:** ReportLab / Jinja2 Thermal HTML templates (80mm & 58mm thermal rolls, 3-inch POS printers, high-fidelity PDF output)
-- **Authentication & Security:** JWT (JSON Web Tokens), role-based access control (Admin, Waiter, Cashier, Kitchen Staff), and SMS OTP integration
-- **Containerization:** Docker & Docker Compose (Production & Portainer ready)
-
----
-
-## 🍽️ Key Modules & Capabilities
-
-### 1. 🪑 Dine-in Table Management & Floor Plans
-- **Multi-Floor / Section Support:** Organize tables across sections (e.g., *Main Hall, AC Hall, Rooftop, Balcony, Bar*).
-- **Table Operations:** Real-time table states (`VACANT`, `OCCUPIED`, `RESERVED`, `CLEANING`).
-- **Live Seating & Order Linking:** Direct table-to-order binding with one-click bill settlement and automatic status release upon payment completion.
-
-### 2. 🧾 Restaurant POS & Order Lifecycle
-- **Multiple Order Types:** Full support for **Dine-in**, **Takeaway**, and **Delivery**.
-- **Order State Machine:** Smooth transitions across states (`DRAFT` → `OPEN` → `SENT_TO_KITCHEN` → `COMPLETED` / `CANCELLED`).
-- **Dynamic Cart & Item Increments:** Add new items or increment quantities on live orders with server-authoritative calculations and version-based optimistic locking concurrency control.
-- **GST & Pricing Calculations:** Comprehensive SGST/CGST/IGST tax calculation, pre-tax line item rates, discount logic, rounding adjustments, and GST tax breakup breakdowns on bills.
-
-### 3. 🍳 Kitchen Display System (KDS) & KOT Management
-- **Kitchen Order Tickets (KOT):** Auto-generated numerical KOTs (`KOT-XXXXXX`) formatted specifically for kitchen thermal printers and display systems.
-- **Station-based Routing:** Organize items by prep stations (*Kitchen, Tandoor, Bar, Desserts*).
-- **Kitchen Ticket States:** `NEW`, `PREPARING`, `READY`, and `SERVED` tracking with special chef instructions and item notes.
-
-### 4. 📋 Menu Management, Categories & Modifiers
-- **Categorization:** Menu items grouped into rich categories with custom emoji/icons, descriptions, and sort priorities.
-- **Menu Items:** Full menu item models supporting variants, pricing, preparation station routing, active flags, and badges (*Chef's Special, Bestseller, Spicy, Veg/Non-Veg*).
-- **Modifiers & Add-ons:** Customizable options (extra cheese, spice levels, preparation choices) linked directly to order lines.
-
-### 5. 💳 Tenders, Settlements & Split Payments
-- **Payment Modes:** Cash, UPI / QR, Credit/Debit Cards, Split Tenders, and Due / Credit accounts.
-- **Settlement Endpoint:** Finalizes payments, updates order paid status (`COMPLETED`), records payment tenders, computes change due, and frees up dining tables.
-- **Thermal Printing Integration:** Instant 80mm/58mm thermal invoice and KOT generation with customizable outlet branding, GSTIN, FSSAI, UPI QR, and bank details.
-
-### 6. ⏱️ Shift Management & Day Closing
-- **Cashier Shifts:** Open and close cashier shifts with starting cash in drawer, recorded sales by payment method, expected cash, actual counted cash, and variance tracking.
-- **Shift Handover:** Generates X-Reports and Z-Reports for end-of-day reconciliation.
-
-### 7. 📦 Restaurant Inventory & Recipe Engine
-- **Ingredients & Stock Ledgers:** Track raw materials (vegetables, dairy, spices, packaging) with minimum stock alerts.
-- **Recipe Consumption:** Map menu items to recipes to automatically deduct ingredient stocks when orders are prepared.
-- **Stock Movements:** Audit trails for inward purchases, kitchen consumption, and spoilage/wastage write-offs.
-
-### 8. 👥 Restaurant CRM & Guest Loyalty
-- **Guest Profiles:** Track customer visit history, total spent, order preferences, and contact numbers.
-- **Walk-in & Guest Fallbacks:** Seamless handling for both named customers and walk-in counter guests.
-
-### 9. 📊 Restaurant Analytics & Reporting
-- **Sales Reports:** Real-time daily, monthly, and custom range revenue analytics.
-- **Order Breakdown:** Payment mode distribution (Cash vs. UPI vs. Card), table turnover rates, hourly rush hours, and item-wise sales volume.
-
-### 10. 🏢 Multi-Tenant Outlet & Shop Settings
-- **Multi-Branch Support:** Single tenant with multiple restaurant outlets/branches.
-- **Branding & Legal:** Store Name, Logo, Address, Contact, FSSAI Number, GSTIN, CIN, and Bank Details (including account holder name & IFSC).
-- **Dynamic UPI Payment:** Instant UPI QR generation on customer receipts directly linked to outlet UPI ID.
+- **Framework:** FastAPI (Python 3.11+) with Async routing
+- **Database:** PostgreSQL 15+ (Multi-Tenant with tenant-isolated row scoping)
+- **ORM & Migrations:** SQLAlchemy 2.0 & Alembic (Latest migration: `f2d4b6a8c0e2`)
+- **Thermal Print Engine:** Jinja2 + ReportLab (58mm & 80mm ESC/POS compatible thermal receipt and KOT generators)
+- **Authentication & Security:** JWT (JSON Web Tokens), Password Hashing (Bcrypt), RBAC (`ADMIN`, `CASHIER`, `WAITER`, `KITCHEN_STAFF`), and SMS OTP
+- **Containerization:** Docker & Docker Compose (Portainer / Production Ready)
 
 ---
 
-## 📂 Project Structure
+## 🏛️ The 6 Core Modules
 
-```text
-SirfBill_Backend_Restraunt/
-├── main.py                     # Application entry point & router aggregator
-├── dependencies.py             # Auth dependencies & database session injection
-├── Dockerfile                  # Container build instructions (Port 8030)
-├── docker-compose.yml          # Production multi-container setup (DB, Backend, pgAdmin)
-├── .env                        # Environment configurations (Credentials & Secrets)
-├── requirements.txt            # Python dependencies
-│
-├── alembic/                    # Database migrations
-│   ├── env.py                  # Alembic environment runner
-│   └── versions/               # Schema migration scripts
-│
-├── models/                     # SQLAlchemy ORM Models
-│   ├── database.py             # Engine, SessionLocal & Base configuration
-│   ├── restaurant_outlet.py    # Outlets / Branches
-│   ├── restaurant_table.py     # Dining tables & sections
-│   ├── restaurant_menu.py      # Menu categories & items
-│   ├── restaurant_modifier.py  # Menu modifiers & add-on options
-│   ├── restaurant_order.py     # Orders & order headers
-│   ├── restaurant_order_line.py# Order items, variants & instructions
-│   ├── restaurant_kitchen.py   # Kitchen order tickets (KOT)
-│   ├── restaurant_tender.py    # Payment tenders & settlements
-│   ├── restaurant_shift.py     # Cashier shifts & drawer closing
-│   ├── restaurant_ingredient.py# Raw ingredients & stock
-│   ├── restaurant_recipe.py    # Recipe mapping & ingredient usage
-│   ├── restaurant_stock_ledger.py # Stock audit & inventory ledger
-│   ├── restaurant_customer.py  # Guest profiles & loyalty
-│   ├── shop.py                 # Multi-tenant shops / organizations
-│   ├── shop_settings.py        # Store branding, GSTIN, FSSAI, bank details
-│   ├── account.py              # Financial bank/cash accounts
-│   ├── transaction.py          # Accounting income & expense ledgers
-│   └── user.py                 # Admin, Cashier, Waiter & Kitchen users
-│
-├── routes/                     # REST API Endpoints (FastAPI Routers)
-│   ├── auth.py                 # Authentication, staff login & token issuance
-│   ├── restaurant_outlets.py   # Outlet management endpoints
-│   ├── restaurant_tables.py    # Table status, seating & floor plans
-│   ├── restaurant_menu.py      # Categories & menu item CRUD
-│   ├── restaurant_orders.py    # Order creation, live tables, append & settle
-│   ├── restaurant_kitchen.py   # KOT management & kitchen status updates
-│   ├── restaurant_tenders.py   # Payment settlement & receipt generation
-│   ├── restaurant_shifts.py    # Cash drawer & shift reconciliation
-│   ├── restaurant_inventory.py # Raw materials, recipes & stock audits
-│   ├── restaurant_reports.py   # Sales reports, daily revenue & metrics
-│   ├── restaurant_crm.py       # Customer directory & order history
-│   ├── shop_settings.py        # Store settings, UPI, FSSAI & bill layout
-│   ├── distributor_admin.py    # Vendor & supplier management
-│   ├── purchase_admin.py       # Purchase orders & stock entry
-│   └── accounts.py             # Accounting accounts & transactions
-│
-├── schemas/                    # Pydantic Schemas (Request/Response Validation)
-│   ├── restaurant_order.py     # Order and line schemas
-│   ├── restaurant_menu.py      # Menu & category schemas
-│   ├── restaurant_table.py     # Dining table schemas
-│   ├── restaurant_kitchen.py   # KOT schemas
-│   ├── restaurant_tender.py    # Payment & settlement schemas
-│   └── shop_settings.py        # Store settings validation
-│
-├── utils/                      # Helper Utilities
-│   ├── restaurant_thermal_printer.py # 80mm/58mm thermal receipt PDF generator
-│   └── pdf_generator.py        # General billing & report PDF generators
-│
-├── templates/                  # Thermal Receipt HTML & Jinja2 Templates
-│   └── thermal_bill_template.html # High-fidelity thermal bill template
-│
-└── uploads/                    # Persistent storage for uploaded media & receipts
-    ├── shop/                   # Brand logos & payment QR codes
-    ├── bills/                  # Generated bill PDFs
-    └── kots/                   # Kitchen ticket print files
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        SirfBill Restaurant Platform                    │
+└────────────────────────────────────────────────────────────────────────┘
+     │                    │                   │                     │
+┌────▼─────────────┐ ┌────▼──────────┐ ┌──────▼───────────┐ ┌───────▼────────────┐
+│ 1. Restaurant    │ │ 2. Kitchen    │ │ 3. Restaurant    │ │ 4. CRM & Executive │
+│    POS Module    │ │    Module     │ │    Inventory     │ │    Reports Module  │
+│ (Order & Tenders)│ │ (KDS & KOT)   │ │ (Recipes & Stock)│ │ (RFM, Ledgers & BCG│
+└──────────────────┘ └───────────────┘ └──────────────────┘ └────────────────────┘
+     │                                                              │
+┌────▼─────────────┐                                           ┌────▼────────────┐
+│ 5. Captain/Waiter│                                           │ 6. Admin & Multi│
+│    Module        │                                           │    Tenant Module│
+│ (Floor & Tables) │                                           │ (RBAC, Sub, Pay)│
+└──────────────────┘                                           └─────────────────┘
 ```
 
 ---
 
-## ⚙️ Environment Configuration (`.env`)
+## 1. 🧾 Restaurant POS Module
 
-Create a `.env` file in the root directory:
+Handles real-time table billing, counter takeaway sales, delivery orders, tender settlements, and thermal receipt generation.
 
-```env
-# Database Settings
-DB_USER=postgres
-DB_PASSWORD=your_secure_password
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=sirfbill_restaurant
+### 🔌 API Endpoints
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/restaurant/orders` | List active & past orders (filters: `outlet_id`, `status`, `order_type`, date range) |
+| `POST` | `/api/restaurant/orders` | Create order header (Dine-in, Takeaway, Delivery) |
+| `GET` | `/api/restaurant/orders/{order_id}` | Fetch order details, line items, version, and financial breakdown |
+| `POST` | `/api/restaurant/orders/{order_id}/lines` | Append items, variants, modifiers, and prep notes to cart |
+| `PATCH` | `/api/restaurant/orders/{order_id}/lines/{line_id}` | Update quantity or cancel an order line |
+| `POST` | `/api/restaurant/orders/{order_id}/transitions` | Order state transitions (`SENT_TO_KITCHEN`, `READY`, `SERVED`, `CANCELLED`) |
+| `POST` | `/api/restaurant/orders/{order_id}/settle` | Settle counter bill, record tender, auto-deduct stock, free table, trigger thermal receipt |
+| `POST` | `/api/restaurant/tenders/{order_id}/settle` | Mixed / split tender checkout (Cash + UPI + Card + Khata) in single transaction |
+| `GET` | `/api/restaurant/tenders/{order_id}/receipt` | Printable thermal invoice dataset with reprint audit counter |
+| `GET` | `/api/restaurant/shifts/current` | Get active cashier shift details |
+| `POST` | `/api/restaurant/shifts/open` | Open cashier shift with initial cash float |
+| `POST` | `/api/restaurant/shifts/close` | Reconcile and close cashier shift with X/Z report output |
 
-# Security & Secrets
-JWT_SECRET=your_super_secret_jwt_key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
+### 📐 Mathematical Formulas
 
-# SMS / OTP Gateway (Optional)
-APITXT_AUTH_KEY=your_apitxt_key
+#### A. Pre-Tax Line Item Subtotal
+$$\text{Line Subtotal} = (\text{Unit Price} \times \text{Quantity}) + \sum_{m=1}^{k} \text{Modifier Price}_m$$
 
-# Payment Gateway (Optional)
-RAZORPAY_KEY_ID=rzp_live_xxx
-RAZORPAY_KEY_SECRET=xxx
+#### B. Order Discount Computation
+- **Percentage Discount:**
+  $$\text{Discount Amount} = \text{Order Subtotal} \times \left(\frac{\text{Discount \%}}{100}\right)$$
+- **Fixed / Flat Discount:**
+  $$\text{Discount Amount} = \min(\text{Order Subtotal}, \text{Flat Discount Value})$$
 
-# pgAdmin (Docker Dashboard)
-PGADMIN_EMAIL=admin@sirfbill.com
-PGADMIN_PASSWORD=admin123
-```
+#### C. Taxable Base & GST (CGST / SGST / IGST)
+$$\text{Taxable Base} = \text{Order Subtotal} - \text{Discount Amount}$$
+$$\text{CGST} = \text{Taxable Base} \times \left(\frac{\text{Tax Rate \%}}{2 \times 100}\right)$$
+$$\text{SGST} = \text{Taxable Base} \times \left(\frac{\text{Tax Rate \%}}{2 \times 100}\right)$$
+$$\text{Total Tax} = \text{CGST} + \text{SGST}$$
+
+#### D. Rounding & Grand Total
+$$\text{Raw Total} = \text{Taxable Base} + \text{Total Tax}$$
+$$\text{Grand Total} = \text{round}(\text{Raw Total}, 0)$$
+$$\text{Rounding Adjustment} = \text{Grand Total} - \text{Raw Total}$$
+
+#### E. Cashier Drawer Reconciliation (Shift Closing)
+$$\text{Expected Cash} = \text{Opening Cash Float} + \sum \text{Cash Tender Receipts} - \sum \text{Cash Payouts}$$
+$$\text{Cash Variance} = \text{Actual Counted Cash} - \text{Expected Cash}$$
 
 ---
 
-## 🐳 Running with Docker
+## 2. 🍳 Kitchen Display System (KDS) & KOT Module
 
-The service can be run fully containerized alongside PostgreSQL and pgAdmin:
+Manages Kitchen Order Tickets (KOTs), prep station line item routing, and kitchen status updates.
 
-### 1. Start Services
+### 🔌 API Endpoints
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/restaurant/kitchen/kots` | Real-time active KOT tickets filtered by outlet, station, or status |
+| `POST` | `/api/restaurant/kitchen/orders/{order_id}/send-kot` | Generate numerical `KOT-XXXXXX`, route items to stations, print thermal KOT |
+| `PATCH` | `/api/restaurant/kitchen/kots/{kot_id}/items/{item_id}/status` | Item-level state transition (`PREPARING` → `READY` → `SERVED`) |
+| `POST` | `/api/restaurant/kitchen/kots/{kot_id}/complete` | Mark complete KOT batch ready for runner dispatch |
+| `POST` | `/api/restaurant/kitchen/kots/{kot_id}/reprint` | Reprint physical KOT slip with reprint audit flag |
+| `GET` | `/api/restaurant/kitchen/stations` | List configured prep stations (*Main Kitchen, Tandoor, Bar, Pantry, Desserts*) |
+
+### 📐 Mathematical & Routing Logic
+- **KOT Ticket Numbering Sequence:**
+  $$\text{KOT Code} = \text{"KOT-"} + \text{Date}(\text{YYYYMMDD}) + \text{"-"} + \text{PadZero}(\text{Sequence}, 4)$$
+- **Station Split Routing:**
+  Order lines are automatically partitioned by target `prep_station`:
+  $$\text{KOT}_{\text{Station}} = \{ \text{line} \in \text{Order} \mid \text{line.item.prep\_station} = \text{Station} \}$$
+
+---
+
+## 3. 📦 Restaurant Inventory, Recipes & Procurement Module
+
+Tracks raw materials, Unit of Measure (UOM) conversions, recipes (Bill of Materials), Moving Weighted Average Cost (WAC), physical count audits, and inter-branch transfers.
+
+### 🔌 API Endpoints
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET`, `POST` | `/api/restaurant/inventory/categories` | Ingredient storage categories and temperature zones (Walk-in chiller, Ambient, etc.) |
+| `GET`, `POST`, `PATCH` | `/api/restaurant/inventory/ingredients` | Ingredient master with UOM, par levels, and Moving Average Cost |
+| `GET` | `/api/restaurant/inventory/stock-summary` | Real-time stock levels, valuation, and reorder alerts |
+| `GET`, `POST`, `PATCH` | `/api/restaurant/inventory/recipes` | Recipe (BOM) mapping: menu item to raw ingredients |
+| `GET` | `/api/restaurant/inventory/ledger` | Append-only inventory transaction ledger |
+| `POST` | `/api/restaurant/inventory/audits/start` | Initialize physical inventory stock audit batch |
+| `POST` | `/api/restaurant/inventory/audits/{id}/items` | Enter physical count (recipe UOM or purchase UOM) |
+| `POST` | `/api/restaurant/inventory/audits/{id}/commit` | Post audit variances to ledger, adjusting book balances |
+| `POST` | `/api/restaurant/inventory/wastage/log` | Record raw material spoilage / kitchen wastage with financial loss snapshot |
+| `POST` | `/api/restaurant/stock-transfers` | Transfer ingredients between outlets (Source Dispatch → Destination Receipt) |
+| `POST` | `/api/restaurant/procurement/grn` | Inward Goods Received Note (GRN) from vendor invoices |
+
+### 📐 Mathematical Formulas
+
+#### A. UOM Normalization
+$$\text{Normalized Qty} = \text{Input Quantity} \times \text{UOM Conversion Factor}$$
+*(e.g., $2.5\text{ KG Chicken} \times 1000 = 2500\text{ G}$)*
+
+#### B. Moving Weighted Average Cost (WAC / MAC)
+When new stock enters via GRN:
+$$\text{New WAC} = \frac{(\text{Current Qty} \times \text{Old WAC}) + (\text{GRN Qty} \times \text{GRN Purchase Price})}{\text{Current Qty} + \text{GRN Qty}}$$
+
+#### C. Recipe Bill of Materials (BOM) Plate Cost
+$$\text{Plate Cost} = \sum_{i=1}^{n} \left(\frac{\text{Quantity Required}_i}{\text{Yield Servings}} \times \text{WAC Unit Cost}_i\right)$$
+
+#### D. Physical Stock Audit Variance
+$$\text{Variance Qty} = \text{Physical Count} - \text{Expected Book Stock}$$
+$$\text{Rupee Variance Impact} = \text{Variance Qty} \times \text{WAC Unit Cost}$$
+- **Surplus:** $\text{Variance Qty} > 0$
+- **Deficit (Shrinkage):** $\text{Variance Qty} < 0$
+
+---
+
+## 4. 👥 CRM, Loyalty & Executive Reports Module
+
+Unified multi-branch guest wallet, append-only loyalty points ledger, store credit (Khata), automated marketing notifications, and 5 executive financial costing reports.
+
+### 🔌 API Endpoints (CRM & Loyalty)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/restaurant/crm/customers` | Search guests by phone/name, filter by RFM segment (`ALL`, `VIP`, `REGULAR`, `NEW`, `AT_RISK`) |
+| `POST` | `/api/restaurant/crm/customers` | Register or update guest profile with dietary preferences, special dates, and GSTIN |
+| `GET`, `PATCH` | `/api/restaurant/crm/customers/{id}` | Read or modify customer profile and credit limit |
+| `GET` | `/api/restaurant/crm/customers/{id}/insights` | 360° guest insights: RFM metrics, Top 5 dishes, recent bills |
+| `GET`, `POST` | `/api/restaurant/crm/loyalty-rules` | Fetch or configure brand loyalty earn/burn rules |
+| `POST` | `/api/restaurant/crm/customers/{id}/loyalty/adjust` | Idempotent points earn/burn with balance verification |
+| `GET` | `/api/restaurant/crm/customers/{id}/loyalty/history` | Immutable loyalty transaction ledger audit trail |
+| `GET` | `/api/restaurant/crm/customers/{id}/khata` | Khata credit balance and detailed ledger statement |
+| `POST` | `/api/restaurant/crm/customers/{id}/khata/settle` | Settle outstanding credit dues with partial/full payment |
+| `POST` | `/api/restaurant/crm/customers/{id}/notify` | Dispatch WhatsApp / SMS / Email receipt or promo message |
+| `POST` | `/api/restaurant/crm/scheduled/run-automations` | Daily cron: birthday rewards, anniversary offers, 30-day win-back alerts |
+
+### 🔌 API Endpoints (The 5 Executive Reports)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/restaurant/reports/food-cost-variance` | **Executive Report 1:** Theoretical COGS vs. Actual COGS, isolating Wastage and Audit Shrinkage |
+| `GET` | `/api/restaurant/reports/stock-movement` | **Executive Report 2:** Stock Movement: Opening + Inward - Consumed - Wastage $\pm$ Audit = Closing |
+| `GET` | `/api/restaurant/reports/menu-engineering` | **Executive Report 3:** BCG Matrix: STAR, PLOWHORSE, PUZZLE, DOG, plate cost, margin, cost alerts |
+| `GET` | `/api/restaurant/reports/procurement` | **Executive Report 4:** Vendor spend, GST input tax by slab (5%, 12%, 18%), unpaid GRN aging buckets |
+| `GET` | `/api/restaurant/reports/shrinkage` | **Executive Report 5:** Top 20 cost-leaking ingredients across Spoilage, Burnt, Return, and Deficit |
+
+### 📐 Mathematical Formulas
+
+#### A. Recency, Frequency, Monetary (RFM) Metrics
+$$\text{Average Order Value (AOV)} = \frac{\text{Total Spend}}{\text{Total Visits}}$$
+- **Segmentation Criteria:**
+  - $\text{VIP} \iff \text{Total Spend} \ge ₹5,000 \lor \text{Total Visits} \ge 10$
+  - $\text{REGULAR} \iff \text{Total Visits} \ge 3$
+  - $\text{NEW} \iff \text{Total Visits} < 3$
+  - $\text{AT\_RISK} \iff (\text{Today} - \text{Last Visit Date}) > 30\text{ days}$
+
+#### B. Loyalty Earn & Burn
+$$\text{Points Earned} = \left\lfloor\frac{\text{Order Grand Total}}{\text{Earn Per Rupees}}\right\rfloor$$
+$$\text{Max Allowed Burn (₹)} = \text{Order Grand Total} \times \left(\frac{\text{Max Redeem \%}}{100}\right)$$
+
+#### C. Theoretical vs. Actual COGS (Food Cost Variance)
+$$\text{Theoretical COGS} = \sum (\text{KOT Deducted Recipe Qty} \times \text{WAC at Time})$$
+$$\text{Actual COGS} = \text{Theoretical COGS} + \text{Logged Wastage Loss (₹)} + \text{Physical Audit Deficit (₹)}$$
+$$\text{Unexplained Variance (₹)} = \text{Actual COGS} - \text{Theoretical COGS}$$
+$$\text{Variance \% of Sales} = \left(\frac{\text{Unexplained Variance}}{\text{Total Food Sales}}\right) \times 100$$
+
+#### D. Menu Engineering BCG Matrix Classification
+For every menu item $j$:
+$$\text{Gross Margin}_j = \text{Selling Price}_j - \text{Plate Cost}_j$$
+$$\text{Food Cost \%}_j = \left(\frac{\text{Plate Cost}_j}{\text{Selling Price}_j}\right) \times 100 \quad (\text{Alert if } > 35\%)$$
+Thresholds:
+$$\overline{\text{Margin}} = \frac{\sum \text{Total Margin}}{\sum \text{Total Qty Sold}}, \quad \overline{\text{Popularity}} = \frac{\sum \text{Total Qty Sold}}{\text{Number of Unique Menu Items}}$$
+
+| Quadrant | Condition | Menu Action Strategy |
+| :--- | :--- | :--- |
+| ⭐ **STAR** | $\text{Qty} \ge \overline{\text{Popularity}}$ and $\text{Margin} \ge \overline{\text{Margin}}$ | Maintain quality; prime menu placement |
+| 🐴 **PLOWHORSE** | $\text{Qty} \ge \overline{\text{Popularity}}$ and $\text{Margin} < \overline{\text{Margin}}$ | Repackage, reduce portion, or increase price slightly |
+| 🧩 **PUZZLE** | $\text{Qty} < \overline{\text{Popularity}}$ and $\text{Margin} \ge \overline{\text{Margin}}$ | Upsell, feature on specials board, run promotions |
+| 🐕 **DOG** | $\text{Qty} < \overline{\text{Popularity}}$ and $\text{Margin} < \overline{\text{Margin}}$ | Re-engineer recipe or eliminate from menu |
+
+---
+
+## 5. 🧑‍🍳 Captain & Waiter Module
+
+Table-side ordering for captains, real-time floor plan visualization, seating assignments, and table transfers.
+
+### 🔌 API Endpoints
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/restaurant/tables` | Live table matrix across floors/sections (`VACANT`, `OCCUPIED`, `RESERVED`, `CLEANING`) |
+| `POST` | `/api/restaurant/tables/{table_id}/seat` | Seat guests, attach party size, bind assigned waiter/captain |
+| `POST` | `/api/restaurant/orders` | Captain creates table-bound Dine-in order |
+| `POST` | `/api/restaurant/orders/{order_id}/lines` | Add running items or extra rounds to active table |
+| `POST` | `/api/restaurant/kitchen/orders/{order_id}/send-kot` | Direct send-to-kitchen from mobile table ordering tablet |
+| `POST` | `/api/restaurant/orders/{order_id}/transitions?payload=SERVED` | Mark food served to guests |
+| `POST` | `/api/restaurant/tables/{table_id}/transfer` | Transfer or merge party from Table A to Table B |
+
+### 📐 Mathematical Metrics
+- **Table Turnover Rate:**
+  $$\text{Table Turnover} = \frac{\text{Total Dine-in Orders on Table}}{\text{Operational Shift Hours}}$$
+- **Dining Duration:**
+  $$\text{Dining Time} = \text{Settlement Time} - \text{Seated Time}$$
+
+---
+
+## 6. 🛡️ Admin, Multi-Tenant & Subscription Module
+
+Role-based access control, tenant branch management, legal configuration, dynamic UPI QR generation, and platform billing.
+
+### 🔌 API Endpoints
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/auth/token` | Staff login, password verification, and JWT access token issuance |
+| `POST` | `/api/auth/admin-login` | Administrative dashboard authentication |
+| `GET`, `POST` | `/api/admin/users` | Staff directory: create & manage Cashiers, Waiters, and Kitchen staff |
+| `GET`, `POST`, `PATCH`| `/api/restaurant/outlets` | Multi-branch management under master tenant |
+| `GET`, `PATCH` | `/api/shop-settings/{outlet_id}`| Brand details: GSTIN, FSSAI, logo URL, UPI ID, and thermal bill layout |
+| `GET` | `/api/subscriptions/plans` | Platform subscription tiers (Silver, Gold, Platinum) |
+| `GET` | `/api/subscriptions/status` | Current tenant subscription validity, active plan, days remaining |
+| `POST` | `/api/subscriptions/create-order`| Initiate Razorpay order for platform license renewal |
+| `POST` | `/api/subscriptions/verify-payment`| Verify payment signature and extend tenant subscription dates |
+| `GET` | `/api/subscriptions/history` | Billing invoices and platform license payment history |
+
+### 📐 Mathematical & Technical Logic
+
+#### A. Dynamic Bharat UPI QR Code Spec
+Embedded in customer thermal receipts for immediate cashierless UPI scanning:
+$$\text{URI} = \text{"upi://pay?pa="} + \text{UPI\_ID} + \text{"\&pn="} + \text{URL\_ENCODE}(\text{Store Name}) + \text{"\&am="} + \text{Grand Total} + \text{"\&cu=INR\&tn="} + \text{Order Number}$$
+
+#### B. Subscription Expiry & Grace Window
+$$\text{Days Remaining} = \text{End Date} - \text{Current Date}$$
+$$\text{Status} = \begin{cases} \text{ACTIVE} & \text{if } \text{Days Remaining} > 0 \\ \text{GRACE\_PERIOD} & \text{if } -3 \le \text{Days Remaining} \le 0 \\ \text{EXPIRED} & \text{if } \text{Days Remaining} < -3 \end{cases}$$
+
+---
+
+## 🚀 Running Locally & Migrations
+
 ```bash
-docker compose up -d --build
-```
-
-- **Backend API:** `http://localhost:8030`
-- **pgAdmin 4 Dashboard:** `http://localhost:8031`
-- **PostgreSQL:** Port `5432`
-
-### 2. View Logs
-```bash
-docker compose logs -f backend
-```
-
-### 3. Stop Services
-```bash
-docker compose down
-```
-
----
-
-## 💻 Running Locally (Development Mode)
-
-### 1. Setup Virtual Environment
-```bash
-python3 -m venv .venv
+# 1. Activate Virtual Environment
 source .venv/bin/activate
-```
 
-### 2. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Run Migrations
-```bash
+# 2. Run Database Migrations to Latest Head
 alembic upgrade head
-```
 
-### 4. Start Development Server
-```bash
+# 3. Start Development Server
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
----
-
-## 📖 API Documentation
-
-Once the backend is running, access the interactive API docs:
-- **Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs) (or [http://localhost:8030/docs](http://localhost:8030/docs) in Docker)
+Interactive API documentation will be available at:
+- **Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
 - **ReDoc:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
 ---
 
 ## 🛡️ License
-Private and Proprietary. All rights reserved.
+Private and Proprietary to **SirfBill (Naiyo24 Pvt. Ltd.)**. All rights reserved.
