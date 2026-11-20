@@ -852,6 +852,23 @@ flowchart TD
   Manager2 --> Chef2[Role: KITCHEN_STAFF]
 ```
 
+#### 🛡️ Role-Based Access Control (RBAC) Permission Matrix
+
+| Capability / API Scope | Super Admin | Outlet Manager (`ADMIN`) | Cashier (`CASHIER`) | Captain / Waiter (`WAITER`) | Kitchen Chef (`KITCHEN_STAFF`) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Dine-in Floor & Seating** | Full | Full | Full | View & Seat | Read Only |
+| **Create & Append Orders** | Full | Full | Full | Full | No Access |
+| **Void / Discount Override** | Full | Full | Requires Approval | No Access | No Access |
+| **Bill Settlement & Tender** | Full | Full | Full | No Access | No Access |
+| **KOT Kitchen Dispatch** | Full | Full | Full | Full | No Access |
+| **KOT Cooking Status (KDS)** | Full | Full | Read Only | Read Only | Full (`PREPARING`, `READY`) |
+| **Inventory & GRN Inward** | Full | Full | No Access | No Access | Read Only |
+| **Physical Stock Audits** | Full | Full | No Access | No Access | Count Entry Only |
+| **CRM Directory & Khata** | Full | Full | Full (Lookup & Settle) | Lookup Only | No Access |
+| **The 5 Executive Reports** | Full | Full | Daily Shift Only | No Access | No Access |
+| **Store Branding & UPI** | Full | Full | No Access | No Access | No Access |
+| **Staff Directory & Roles** | Full | Full | No Access | No Access | No Access |
+
 ### 🔌 API Endpoints
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -933,6 +950,154 @@ The print engine produces pixel-accurate PDF outputs designed for ESC/POS direct
    - Ingredient deduction on KOT dispatch and Khata settlements use `SELECT ... FOR UPDATE` to ensure stock quantities and store credit balances never drift under heavy concurrency.
 3. **Idempotency Enforcement:**
    - Financial transactions (`RestaurantTender`, `RestaurantCustomerCreditLedger`, `RestaurantLoyaltyLedger`) enforce unique `idempotency_key` constraints to eliminate duplicate billing on network re-transmissions.
+
+---
+
+## 📡 Key API Request & Response Payloads (JSON Specifications)
+
+### 1. Create Dine-in Order & Append Cart Items
+`POST /api/restaurant/orders`
+```json
+{
+  "outlet_id": "00a2b6d2-2803-4384-817a-d8bbaa7a0f28",
+  "table_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "order_type": "DINE_IN",
+  "customer_id": "3b4f5cf2-4584-40d5-a9b5-6e58caec65cb",
+  "notes": "Less spicy, extra napkins"
+}
+```
+
+`POST /api/restaurant/orders/{order_id}/lines`
+```json
+{
+  "item_id": "e8a946b2-6712-421f-8e3b-f7253b26c714",
+  "variant_name": "Full",
+  "quantity": 2,
+  "unit_price": 360.00,
+  "modifiers": [
+    {
+      "modifier_option_id": "b1a2c3d4-0000-0000-0000-000000000001",
+      "name": "Extra Raita",
+      "price": 30.00
+    }
+  ],
+  "notes": "Serve hot"
+}
+```
+
+### 2. Mixed Tender Settlement (Cash + UPI + Khata)
+`POST /api/restaurant/tenders/{order_id}/settle`
+```json
+{
+  "discount_type": "PERCENTAGE",
+  "discount_value": 10.0,
+  "discount_reason": "Regular Patron Discount",
+  "idempotency_key": "TXN_SETTLE_20261120_0001",
+  "tenders": [
+    {
+      "method": "CASH",
+      "amount": 500.00,
+      "reference": null
+    },
+    {
+      "method": "UPI",
+      "amount": 250.00,
+      "reference": "UPI/234910283401"
+    },
+    {
+      "method": "KHATA",
+      "amount": 100.00,
+      "reference": "Added to store credit tab"
+    }
+  ]
+}
+```
+
+### 3. Settle Guest Khata Outstanding Tab
+`POST /api/restaurant/crm/customers/{customer_id}/khata/settle`
+```json
+{
+  "amount": 100.00,
+  "payment_mode": "UPI",
+  "notes": "Paid via GooglePay scanner",
+  "idempotency_key": "KHATA_PAY_20261120_0099"
+}
+```
+
+### 4. Food Cost Variance Executive Report Response
+`GET /api/restaurant/reports/food-cost-variance?outlet_id=00a2b6d2-2803-4384-817a-d8bbaa7a0f28`
+```json
+{
+  "outlet_id": "00a2b6d2-2803-4384-817a-d8bbaa7a0f28",
+  "start_date": "2026-10-21",
+  "end_date": "2026-11-20",
+  "total_food_sales": 70103.25,
+  "theoretical_cogs": 1323.00,
+  "actual_cogs": 1813.00,
+  "logged_wastage_loss": 350.00,
+  "physical_audit_shrinkage": 140.00,
+  "unexplained_variance": 490.00,
+  "variance_pct_of_sales": 0.7,
+  "theoretical_cogs_pct": 1.9,
+  "actual_cogs_pct": 2.6,
+  "breakdown": [
+    {
+      "ingredient_id": "4b6f8a0c-2d3e-4f5a-8b1c-9d0e1f2a3b4c",
+      "ingredient_name": "Chicken (Broiler)",
+      "category_name": "Poultry & Meat",
+      "unit": "G",
+      "theoretical_consumed_qty": 3500.0,
+      "theoretical_cost": 875.00,
+      "actual_consumed_qty": 4100.0,
+      "actual_cost": 1025.00,
+      "kitchen_wastage_qty": 400.0,
+      "kitchen_wastage_cost": 100.00,
+      "audit_shrinkage_qty": 200.0,
+      "audit_shrinkage_cost": 50.00,
+      "variance_cost": 150.00,
+      "variance_pct": 17.1
+    }
+  ]
+}
+```
+
+---
+
+## 🧪 Testing & Verification Suite
+
+A comprehensive automated integration test suite is located under `scripts/test_crm_and_reports.py`. It verifies all CRM operations, loyalty point accruals, Khata credit/debit balances, and the 5 Executive Financial Costing Reports.
+
+```bash
+# Run backend test suite
+PYTHONPATH=. .venv/bin/python scripts/test_crm_and_reports.py
+```
+
+### Test Coverage Highlights
+- Customer Registration, Phone Deduplication & Segment Tagging: **PASS**
+- Idempotent Points Adjustment & Ledger Verification: **PASS**
+- Store Credit (Khata) Statement & Payment Settlement: **PASS**
+- Automated Scheduled Jobs (Birthdays, Anniversaries, Win-Back): **PASS**
+- Executive Report 1 (Theoretical vs Actual COGS): **PASS**
+- Executive Report 2 (Stock Movement & Rupee Valuation): **PASS**
+- Executive Report 3 (Menu Engineering BCG Matrix): **PASS**
+- Executive Report 4 (Procurement Spend & Aging Buckets): **PASS**
+- Executive Report 5 (Shrinkage & Wastage Loss Ranking): **PASS**
+
+---
+
+## 🚦 Standard HTTP Status Codes & Error Formats
+
+| HTTP Status | Meaning | Typical Usage |
+| :---: | :--- | :--- |
+| `200 OK` | Request Succeeded | Read operations, order status queries, report fetches |
+| `201 Created` | Resource Created | New orders, line additions, customer registration, tenders |
+| `204 No Content`| Success No Body | Soft delete of customer or menu item deactivation |
+| `400 Bad Request` | Validation Error | Insufficient loyalty points, negative settlement amount |
+| `401 Unauthorized`| Missing / Bad Token | Missing or expired JWT Bearer token |
+| `403 Forbidden` | Access Denied | Insufficient RBAC role (e.g. Waiter trying to settle bill) |
+| `404 Not Found` | Resource Missing | Non-existent `order_id`, `table_id`, or `customer_id` |
+| `409 Conflict` | Optimistic Lock Race | Concurrent order edit where `version` mismatch occurred |
+| `422 Unprocessable`| Pydantic Error | Payload field missing or invalid data type |
 
 ---
 
