@@ -37,7 +37,7 @@ class ShopBill(Base):
     delivery_address = Column(JSONB, nullable=True) # Used for online orders
     created_at = Column(DateTime, default=datetime.now)
 
-    shop = relationship("Shop", back_populates="bills")
+    shop = relationship("Shop")
     items = relationship("ShopBillItem", back_populates="bill")
 
 

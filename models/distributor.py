@@ -25,5 +25,3 @@ class Distributor(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     shop = relationship("Shop")
-    purchase_bills = relationship("PurchaseBill", back_populates="distributor")
-    inventory_items = relationship("InventoryItem", back_populates="distributor_rel")

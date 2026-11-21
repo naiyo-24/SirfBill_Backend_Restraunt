@@ -21,6 +21,3 @@ class Shop(Base):
     is_primary = Column(Boolean, default=False)
     account_holder_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-
-    inventory_items = relationship("InventoryItem", back_populates="shop")
-    bills = relationship("ShopBill", back_populates="shop")

@@ -53,8 +53,7 @@ class RestaurantCustomer(Base):
 
     outlet = relationship("RestaurantOutlet", foreign_keys=[outlet_id])
     home_outlet = relationship("RestaurantOutlet", foreign_keys=[home_outlet_id])
-    loyalty_ledger = relationship("RestaurantLoyaltyLedger", back_populates="customer", cascade="all, delete-orphan")
-    credit_ledger = relationship("RestaurantCustomerCreditLedger", back_populates="customer", cascade="all, delete-orphan")
+    ledger_entries = relationship("RestaurantCustomerLedger", back_populates="customer", cascade="all, delete-orphan")
     notifications = relationship("RestaurantCrmNotification", back_populates="customer", cascade="all, delete-orphan")
 
 
@@ -80,51 +79,32 @@ class RestaurantLoyaltyRules(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
-class RestaurantLoyaltyLedger(Base):
+class RestaurantCustomerLedger(Base):
     """
-    Append-only loyalty ledger: Points earned, redeemed, or reversed.
-    Guarantees immutable accounting auditability.
+    Unified append-only customer ledger:
+    Consolidates both loyalty points (earn/burn) and Khata store credit (debit/credit settlement).
     """
-    __tablename__ = "restaurant_loyalty_ledger"
+    __tablename__ = "restaurant_customer_ledger"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    outlet_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_outlets.id", ondelete="CASCADE"), nullable=True, index=True)
     customer_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_customers.id", ondelete="CASCADE"), nullable=False, index=True)
-    points_delta = Column(Integer, nullable=False) # Positive for earn, Negative for redeem
-    balance_after = Column(Integer, default=0, nullable=False)
-    reason = Column(String(50), nullable=False)    # ORDER_EARN, ORDER_REDEEM, MANUAL_ADJUSTMENT, REVERSAL, EXPIRED
-    source_order_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_orders.id", ondelete="SET NULL"), nullable=True)
+    tenant_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    order_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_orders.id", ondelete="SET NULL"), nullable=True, index=True)
 
-    idempotency_key = Column(String(100), unique=True, nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    customer = relationship("RestaurantCustomer", back_populates="loyalty_ledger")
-    order = relationship("RestaurantOrder")
-
-
-class RestaurantCustomerCreditLedger(Base):
-    """
-    Append-only Khata ledger:
-    - DEBIT: Store credit sale (adds to outstanding dues)
-    - CREDIT: Customer settles partial or full dues
-    """
-    __tablename__ = "restaurant_customer_credit_ledger"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    customer_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_customers.id", ondelete="CASCADE"), nullable=False, index=True)
-    outlet_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_outlets.id", ondelete="CASCADE"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    order_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_orders.id", ondelete="SET NULL"), nullable=True)
-
-    transaction_type = Column(String(20), nullable=False) # "DEBIT" (Dined on credit) or "CREDIT" (Paid dues)
-    amount = Column(Numeric(12, 2), nullable=False)
-    balance_after = Column(Numeric(12, 2), nullable=False)
-    payment_mode = Column(String(50), nullable=True)      # "CASH", "UPI", "CARD", "BANK_TRANSFER"
+    ledger_type = Column(String(30), nullable=False)       # "LOYALTY" or "CREDIT"
+    transaction_type = Column(String(30), nullable=False)  # ORDER_EARN, ORDER_REDEEM, DEBIT, CREDIT, SETTLE
+    points_delta = Column(Integer, default=0, nullable=False)
+    amount = Column(Numeric(12, 2), default=0.00, nullable=False)
+    balance_after = Column(Numeric(12, 2), default=0.00, nullable=False)
+    payment_mode = Column(String(50), nullable=True)       # CASH, UPI, CARD, etc.
+    reason = Column(String(100), nullable=True)
     notes = Column(Text, nullable=True)
     idempotency_key = Column(String(100), unique=True, nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    customer = relationship("RestaurantCustomer", back_populates="credit_ledger")
+    customer = relationship("RestaurantCustomer", back_populates="ledger_entries")
     order = relationship("RestaurantOrder")
     outlet = relationship("RestaurantOutlet")
 

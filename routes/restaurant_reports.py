@@ -15,7 +15,7 @@ from models.restaurant_tender import RestaurantTender
 from models.restaurant_audit import RestaurantAuditEvent
 from models.restaurant_ingredient import RestaurantIngredient, RestaurantIngredientCategory
 from models.restaurant_stock_ledger import RestaurantStockLedger
-from models.restaurant_recipe import RestaurantRecipe, RestaurantRecipeLine
+from models.restaurant_recipe import RestaurantRecipe
 from models.restaurant_stock_audit import RestaurantStockAudit, RestaurantStockAuditItem
 from models.restaurant_procurement import RestaurantSupplier, RestaurantGRN, RestaurantGRNItem
 from schemas.restaurant_reports import (

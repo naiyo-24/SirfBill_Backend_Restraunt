@@ -13,8 +13,7 @@ from models.restaurant_outlet import RestaurantOutlet
 from models.restaurant_customer import (
     RestaurantCustomer,
     RestaurantLoyaltyRules,
-    RestaurantLoyaltyLedger,
-    RestaurantCustomerCreditLedger,
+    RestaurantCustomerLedger,
     RestaurantCrmNotification,
 )
 from models.restaurant_order import RestaurantOrder
@@ -100,12 +99,16 @@ def process_order_settlement_crm(
         pts_earned = int(order.grand_total / rules.earn_per_rupees)
         if pts_earned > 0:
             customer.loyalty_points = (customer.loyalty_points or 0) + pts_earned
-            ledger_entry = RestaurantLoyaltyLedger(
+            ledger_entry = RestaurantCustomerLedger(
                 customer_id=customer.id,
+                outlet_id=order.outlet_id,
+                tenant_id=order.tenant_id,
+                order_id=order.id,
+                ledger_type="LOYALTY",
+                transaction_type="ORDER_EARN",
                 points_delta=pts_earned,
-                balance_after=customer.loyalty_points,
+                balance_after=Decimal(str(customer.loyalty_points)),
                 reason="ORDER_EARN",
-                source_order_id=order.id,
                 idempotency_key=f"EARN_{order.id}"
             )
             db.add(ledger_entry)
@@ -113,11 +116,12 @@ def process_order_settlement_crm(
     # 4. Debit Khata if on credit
     if khata_amount > 0:
         customer.credit_balance = (customer.credit_balance or Decimal("0.00")) + khata_amount
-        credit_entry = RestaurantCustomerCreditLedger(
+        credit_entry = RestaurantCustomerLedger(
             customer_id=customer.id,
             outlet_id=order.outlet_id,
             tenant_id=order.tenant_id,
             order_id=order.id,
+            ledger_type="CREDIT",
             transaction_type="DEBIT",
             amount=khata_amount,
             balance_after=customer.credit_balance,
@@ -501,8 +505,8 @@ def adjust_loyalty_points(
     """
     if payload.idempotency_key:
         existing = (
-            db.query(RestaurantLoyaltyLedger)
-            .filter(RestaurantLoyaltyLedger.idempotency_key == payload.idempotency_key)
+            db.query(RestaurantCustomerLedger)
+            .filter(RestaurantCustomerLedger.idempotency_key == payload.idempotency_key)
             .first()
         )
         if existing:
@@ -517,12 +521,16 @@ def adjust_loyalty_points(
 
     customer.loyalty_points = (customer.loyalty_points or 0) + payload.points_delta
 
-    ledger = RestaurantLoyaltyLedger(
+    ledger = RestaurantCustomerLedger(
         customer_id=customer.id,
+        outlet_id=customer.outlet_id,
+        tenant_id=customer.tenant_id,
+        ledger_type="LOYALTY",
+        transaction_type=payload.reason,
         points_delta=payload.points_delta,
-        balance_after=customer.loyalty_points,
+        balance_after=Decimal(str(customer.loyalty_points)),
         reason=payload.reason,
-        source_order_id=payload.source_order_id,
+        order_id=payload.source_order_id,
         idempotency_key=payload.idempotency_key
     )
     db.add(ledger)
@@ -546,9 +554,9 @@ def get_loyalty_history(
         raise HTTPException(status_code=404, detail="Customer not found")
 
     return (
-        db.query(RestaurantLoyaltyLedger)
-        .filter(RestaurantLoyaltyLedger.customer_id == customer_id)
-        .order_by(RestaurantLoyaltyLedger.created_at.desc())
+        db.query(RestaurantCustomerLedger)
+        .filter(RestaurantCustomerLedger.customer_id == customer_id, RestaurantCustomerLedger.ledger_type == "LOYALTY")
+        .order_by(RestaurantCustomerLedger.created_at.desc())
         .limit(limit)
         .all()
     )
@@ -572,9 +580,9 @@ def get_khata_statement(
         raise HTTPException(status_code=404, detail="Customer not found")
 
     ledger_entries = (
-        db.query(RestaurantCustomerCreditLedger)
-        .filter(RestaurantCustomerCreditLedger.customer_id == customer_id)
-        .order_by(RestaurantCustomerCreditLedger.created_at.desc())
+        db.query(RestaurantCustomerLedger)
+        .filter(RestaurantCustomerLedger.customer_id == customer_id, RestaurantCustomerLedger.ledger_type == "CREDIT")
+        .order_by(RestaurantCustomerLedger.created_at.desc())
         .limit(limit)
         .all()
     )
@@ -601,8 +609,8 @@ def settle_khata_dues(
     """
     if payload.idempotency_key:
         existing = (
-            db.query(RestaurantCustomerCreditLedger)
-            .filter(RestaurantCustomerCreditLedger.idempotency_key == payload.idempotency_key)
+            db.query(RestaurantCustomerLedger)
+            .filter(RestaurantCustomerLedger.idempotency_key == payload.idempotency_key)
             .first()
         )
         if existing:
@@ -617,10 +625,11 @@ def settle_khata_dues(
 
     customer.credit_balance = max(Decimal("0.00"), customer.credit_balance - payload.amount)
 
-    ledger_entry = RestaurantCustomerCreditLedger(
+    ledger_entry = RestaurantCustomerLedger(
         customer_id=customer.id,
         outlet_id=customer.outlet_id,
         tenant_id=customer.tenant_id,
+        ledger_type="CREDIT",
         transaction_type="CREDIT", # Payment received
         amount=payload.amount,
         balance_after=customer.credit_balance,

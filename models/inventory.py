@@ -41,5 +41,5 @@ class InventoryItem(Base):
     created_at = Column(DateTime, default=datetime.now)
     is_deleted = Column(Integer, default=0, index=True)
 
-    shop = relationship("Shop", back_populates="inventory_items")
-    distributor_rel = relationship("Distributor", back_populates="inventory_items")
+    shop = relationship("Shop")
+    distributor_rel = relationship("Distributor")

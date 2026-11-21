@@ -44,6 +44,9 @@ class RestaurantMenuItem(Base):
     prep_station = Column(String(50), default="KITCHEN", nullable=False) # KITCHEN, BAR, DESSERT, PIZZA, PANTRY
     tax_rate = Column(Numeric(5, 2), default=5.00, nullable=False) # 5.00% GST default for restaurants
     price = Column(Numeric(10, 2), default=0.00, nullable=True) # Direct base price
+    takeaway_price = Column(Numeric(10, 2), nullable=True)
+    delivery_price = Column(Numeric(10, 2), nullable=True)
+    variant_prices = Column(JSON, default=list, nullable=True)
     badge = Column(String(50), nullable=True) # E.g. Popular, Bestseller, Chef Special
 
     is_available = Column(Boolean, default=True, nullable=False)
@@ -54,24 +57,17 @@ class RestaurantMenuItem(Base):
 
     outlet = relationship("RestaurantOutlet", back_populates="items")
     category = relationship("RestaurantMenuCategory", back_populates="items")
-    prices = relationship("RestaurantItemPrice", back_populates="item", cascade="all, delete-orphan")
-    modifier_links = relationship("RestaurantItemModifierGroup", back_populates="item", cascade="all, delete-orphan")
 
-
-class RestaurantItemPrice(Base):
-    """
-    Channel-specific or variant pricing in minor units (paise) or Decimal.
-    e.g. Regular vs Large, or Dine-In vs Takeaway vs Delivery pricing.
-    """
-    __tablename__ = "restaurant_item_prices"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    item_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_menu_items.id", ondelete="CASCADE"), nullable=False, index=True)
-    
-    variant_name = Column(String(50), default="Standard", nullable=False) # Standard, Half, Full, Small, Large
-    channel = Column(String(30), default="DEFAULT", nullable=False) # DEFAULT, DINE_IN, TAKEAWAY, DELIVERY
-    price = Column(Numeric(10, 2), nullable=False) # Server authoritative base price
-
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    item = relationship("RestaurantMenuItem", back_populates="prices")
+    @property
+    def prices(self):
+        """Synthesized price list for API backward compatibility."""
+        return [
+            {
+                "id": self.id,
+                "item_id": self.id,
+                "variant_name": "Standard",
+                "channel": "DEFAULT",
+                "price": self.price or 0.00,
+                "created_at": self.created_at
+            }
+        ]

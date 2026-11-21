@@ -17,9 +17,8 @@ from models.database import get_db
 from models.user import User
 from models.restaurant_outlet import RestaurantOutlet
 from models.restaurant_ingredient import RestaurantIngredient, RestaurantIngredientCategory
-from models.restaurant_menu import RestaurantMenuItem, RestaurantMenuCategory, RestaurantItemPrice
-from models.restaurant_recipe import RestaurantRecipe, RestaurantRecipeLine
-from models.restaurant_modifier import RestaurantModifierOption
+from models.restaurant_menu import RestaurantMenuItem, RestaurantMenuCategory
+from models.restaurant_recipe import RestaurantRecipe
 from models.restaurant_stock_ledger import RestaurantStockLedger
 from models.restaurant_stock_audit import RestaurantStockAudit, RestaurantStockAuditItem
 from models.restaurant_order import RestaurantOrder
@@ -1384,8 +1383,6 @@ def create_recipe(
         recipe.instructions = payload.instructions
         if payload.outlet_id:
             recipe.outlet_id = payload.outlet_id
-        # Remove existing lines and replace
-        db.query(RestaurantRecipeLine).filter(RestaurantRecipeLine.recipe_id == recipe.id).delete()
     else:
         recipe = RestaurantRecipe(
             item_id=payload.item_id,
@@ -1399,6 +1396,7 @@ def create_recipe(
         db.add(recipe)
         db.flush()
 
+    recipe_items = []
     for line in payload.lines:
         ing = db.query(RestaurantIngredient).filter(RestaurantIngredient.id == line.ingredient_id).first()
         if not ing:
@@ -1413,14 +1411,13 @@ def create_recipe(
             conversion_factor=ing.uom_conversion_factor
         )
 
-        r_line = RestaurantRecipeLine(
-            recipe_id=recipe.id,
-            ingredient_id=line.ingredient_id,
-            quantity_required=norm_qty,
-            unit=norm_uom
-        )
-        db.add(r_line)
+        recipe_items.append({
+            "ingredient_id": str(line.ingredient_id),
+            "quantity_required": float(norm_qty),
+            "unit": norm_uom
+        })
 
+    recipe.items = recipe_items
     db.commit()
     db.refresh(recipe)
 

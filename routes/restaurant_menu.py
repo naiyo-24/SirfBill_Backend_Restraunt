@@ -20,8 +20,8 @@ from sqlalchemy.orm import Session, joinedload
 from models.database import get_db
 from models.user import User
 from models.restaurant_outlet import RestaurantOutlet
-from models.restaurant_menu import RestaurantMenuCategory, RestaurantMenuItem, RestaurantItemPrice
-from models.restaurant_modifier import RestaurantModifierGroup, RestaurantModifierOption, RestaurantItemModifierGroup
+from models.restaurant_menu import RestaurantMenuCategory, RestaurantMenuItem
+from models.restaurant_modifier import RestaurantModifierGroup
 from schemas.restaurant_menu import (
     RestaurantMenuCategoryCreate, RestaurantMenuCategoryUpdate, RestaurantMenuCategoryResponse,
     RestaurantMenuItemCreate, RestaurantMenuItemUpdate, RestaurantMenuItemResponse
@@ -263,33 +263,10 @@ def create_menu_item(
     db.add(item)
     db.flush()
 
-    # Add standard base price to prices table as well for variant compatibility
-    base_price = payload.price or Decimal("0.00")
-    if not payload.prices:
-        db_price = RestaurantItemPrice(
-            item_id=item.id,
-            variant_name="Standard",
-            channel="DEFAULT",
-            price=base_price
-        )
-        db.add(db_price)
-    else:
-        for p in payload.prices:
-            db_price = RestaurantItemPrice(
-                item_id=item.id,
-                variant_name=p.variant_name,
-                channel=p.channel,
-                price=p.price
-            )
-            db.add(db_price)
-
-    # Add modifier group associations
-    for grp_id in payload.modifier_group_ids:
-        link = RestaurantItemModifierGroup(
-            item_id=item.id,
-            modifier_group_id=grp_id
-        )
-        db.add(link)
+    # Set base price and optional variant prices directly
+    item.price = payload.price or Decimal("0.00")
+    if payload.prices:
+        item.variant_prices = [p.model_dump() for p in payload.prices]
 
     db.commit()
     db.refresh(item)
@@ -339,20 +316,6 @@ def update_menu_item(
     # Handle price update if supplied
     if "price" in dump and dump["price"] is not None:
         item.price = dump["price"]
-        price_rec = db.query(RestaurantItemPrice).filter(
-            RestaurantItemPrice.item_id == item.id,
-            RestaurantItemPrice.channel == "DEFAULT"
-        ).first()
-        if price_rec:
-            price_rec.price = dump["price"]
-        else:
-            new_price = RestaurantItemPrice(
-                item_id=item.id,
-                variant_name="Standard",
-                channel="DEFAULT",
-                price=dump["price"]
-            )
-            db.add(new_price)
 
     # Set remaining fields
     standard_fields = ["name", "short_code", "description", "image_url", "badge", "prep_station", "tax_rate", "is_available", "is_active"]
@@ -854,20 +817,7 @@ async def bulk_upload_menu_items(
             existing_item.is_available = is_available
             
             # Update default price record
-            default_price = db.query(RestaurantItemPrice).filter(
-                RestaurantItemPrice.item_id == existing_item.id,
-                RestaurantItemPrice.channel == "DEFAULT"
-            ).first()
-            if default_price:
-                default_price.price = price_val
-            else:
-                db.add(RestaurantItemPrice(
-                    id=uuid.uuid4(),
-                    item_id=existing_item.id,
-                    variant_name="Standard",
-                    channel="DEFAULT",
-                    price=price_val
-                ))
+            existing_item.price = price_val
             updated_items_count += 1
         else:
             # Create new menu item with auto-generated UUID
@@ -890,16 +840,6 @@ async def bulk_upload_menu_items(
                 is_active=True
             )
             db.add(new_item)
-            db.flush()
-
-            # Create default standard price
-            db.add(RestaurantItemPrice(
-                id=uuid.uuid4(),
-                item_id=new_item.id,
-                variant_name="Standard",
-                channel="DEFAULT",
-                price=price_val
-            ))
             created_items_count += 1
 
     db.commit()

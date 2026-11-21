@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from models.restaurant_ingredient import RestaurantIngredient
-from models.restaurant_menu import RestaurantMenuItem, RestaurantItemPrice
-from models.restaurant_recipe import RestaurantRecipe, RestaurantRecipeLine
+from models.restaurant_menu import RestaurantMenuItem
+from models.restaurant_recipe import RestaurantRecipe
 
 
 def normalize_recipe_uom(
@@ -127,20 +127,8 @@ def calculate_recipe_costing_data(
             item_name = menu_item.name
             if selling_price_override is not None:
                 selling_price = Decimal(str(selling_price_override))
-            else:
-                # Check variant price
-                variant_price = (
-                    db.query(RestaurantItemPrice)
-                    .filter(
-                        RestaurantItemPrice.item_id == menu_item.id,
-                        RestaurantItemPrice.variant_name == recipe.variant_name
-                    )
-                    .first()
-                )
-                if variant_price and variant_price.price is not None:
-                    selling_price = Decimal(str(variant_price.price))
-                elif menu_item.price is not None:
-                    selling_price = Decimal(str(menu_item.price))
+            elif menu_item.price is not None:
+                selling_price = Decimal(str(menu_item.price))
 
     yield_val = Decimal(str(recipe.yield_servings or 1.00))
     if yield_val <= Decimal("0.00"):

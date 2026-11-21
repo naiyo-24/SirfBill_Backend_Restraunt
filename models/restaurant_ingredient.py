@@ -62,7 +62,7 @@ class RestaurantIngredient(Base):
     min_par_level = Column(Numeric(12, 3), default=0.000, nullable=True)
     ideal_par_level = Column(Numeric(12, 3), default=0.000, nullable=True)
     cost_per_purchase_unit = Column(Numeric(10, 2), default=0.00, nullable=True)
-    primary_supplier_id = Column(UUID(as_uuid=True), ForeignKey("distributors.id", ondelete="SET NULL"), nullable=True, index=True)
+    primary_supplier_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
     is_perishable = Column(Boolean, default=False, nullable=False)
     shelf_life_days = Column(Integer, nullable=True)
     last_restocked_at = Column(DateTime, default=datetime.utcnow, nullable=True)
@@ -75,7 +75,6 @@ class RestaurantIngredient(Base):
 
     outlet = relationship("RestaurantOutlet", back_populates="ingredients")
     category = relationship("RestaurantIngredientCategory", back_populates="ingredients")
-    supplier = relationship("Distributor")
-    recipe_lines = relationship("RestaurantRecipeLine", back_populates="ingredient")
+    supplier = relationship("RestaurantSupplier")
     ledger_entries = relationship("RestaurantStockLedger", back_populates="ingredient")
 

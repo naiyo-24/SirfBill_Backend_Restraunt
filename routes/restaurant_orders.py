@@ -9,12 +9,12 @@ from models.database import get_db
 from models.user import User
 from models.restaurant_outlet import RestaurantOutlet
 from models.restaurant_table import RestaurantTable
-from models.restaurant_menu import RestaurantMenuItem, RestaurantItemPrice
+from models.restaurant_menu import RestaurantMenuItem
 from models.restaurant_order import RestaurantOrder
 from models.restaurant_order_line import RestaurantOrderLine
 from models.restaurant_kitchen import RestaurantKitchenTicket, RestaurantKitchenTicketItem, RestaurantKitchenEvent
 from models.restaurant_audit import RestaurantAuditEvent
-from models.restaurant_recipe import RestaurantRecipe, RestaurantRecipeLine
+from models.restaurant_recipe import RestaurantRecipe
 from models.restaurant_ingredient import RestaurantIngredient
 from models.restaurant_stock_ledger import RestaurantStockLedger
 from models.restaurant_tender import RestaurantTender
@@ -56,17 +56,13 @@ def _calculate_line_item(db: Session, item_id: UUID, variant_name: str, quantity
     if not item.is_available:
         raise HTTPException(status_code=400, detail=f"Menu item '{item.name}' is currently marked unavailable")
 
-    # Find variant price or fallback to lowest price
-    variant_price_row = (
-        db.query(RestaurantItemPrice)
-        .filter(RestaurantItemPrice.item_id == item.id)
-        .filter(RestaurantItemPrice.variant_name == variant_name)
-        .first()
-    )
-    if not variant_price_row:
-        variant_price_row = db.query(RestaurantItemPrice).filter(RestaurantItemPrice.item_id == item.id).first()
-    
-    unit_price = Decimal(str(variant_price_row.price)) if variant_price_row else Decimal("0.00")
+    # Direct server-authoritative unit price from menu item (with variant override if specified)
+    unit_price = Decimal(str(item.price or 0.00))
+    if variant_name and variant_name.upper() != "STANDARD" and item.variant_prices:
+        for vp in item.variant_prices:
+            if isinstance(vp, dict) and vp.get("variant_name", "").upper() == variant_name.upper():
+                unit_price = Decimal(str(vp.get("price", unit_price)))
+                break
     
     # Calculate modifiers sum
     modifier_price = Decimal("0.00")
