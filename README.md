@@ -36,9 +36,8 @@ A high-performance, multi-tenant, enterprise-grade restaurant management backend
 │
 ├── alembic/                    # Database migrations
 │   ├── env.py                  # Alembic runtime environment
-│   └── versions/               # Single final baseline schema (Latest: b2d4f6h8j0l2)
-│       ├── b2d4f6h8j0l2_final_consolidated_schema.py # Single squashed production baseline
-│       └── archive_legacy/     # Archived incremental migration history
+│   └── versions/               # Single authoritative baseline schema
+│       └── b2d4f6h8j0l2_final_consolidated_schema.py # Complete 40-table production DDL baseline
 │
 ├── models/                     # SQLAlchemy ORM Models (Consolidated 40-table schema)
 │   ├── database.py             # Engine, SessionLocal, and Declarative Base
