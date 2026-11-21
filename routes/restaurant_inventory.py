@@ -1325,7 +1325,7 @@ def get_all_recipes(
     """
     List all Bill of Materials (BOM) recipes with real-time plate costs, food cost %, and margins.
     """
-    query = db.query(RestaurantRecipe).options(joinedload(RestaurantRecipe.lines))
+    query = db.query(RestaurantRecipe)
     if outlet_id:
         query = query.filter((RestaurantRecipe.outlet_id == outlet_id) | (RestaurantRecipe.outlet_id == None))
     if item_id:
@@ -1449,7 +1449,6 @@ def get_item_recipes(
 ):
     recipes = (
         db.query(RestaurantRecipe)
-        .options(joinedload(RestaurantRecipe.lines))
         .filter(RestaurantRecipe.item_id == item_id)
         .all()
     )
@@ -1475,7 +1474,6 @@ def get_modifier_recipes(
     """
     recipes = (
         db.query(RestaurantRecipe)
-        .options(joinedload(RestaurantRecipe.lines))
         .filter(RestaurantRecipe.modifier_option_id == modifier_option_id)
         .all()
     )
@@ -1506,7 +1504,6 @@ def get_item_recipe_costing(
     """
     recipes = (
         db.query(RestaurantRecipe)
-        .options(joinedload(RestaurantRecipe.lines))
         .filter(RestaurantRecipe.item_id == item_id)
         .all()
     )

@@ -115,7 +115,7 @@ def upgrade() -> None:
         sa.Column('email', sa.String(), nullable=True),
         sa.Column('password', sa.String(), nullable=True),
         sa.Column('avatar_url', sa.String(), nullable=True),
-        sa.Column('saved_addresses', postgresql.JSONB(astext_type=Text()), nullable=True),
+        sa.Column('saved_addresses', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
         sa.Column('location', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=True),

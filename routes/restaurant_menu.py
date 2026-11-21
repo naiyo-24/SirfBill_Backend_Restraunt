@@ -176,7 +176,6 @@ def get_menu_items(
 
     query = (
         db.query(RestaurantMenuItem)
-        .options(joinedload(RestaurantMenuItem.prices))
         .filter(RestaurantMenuItem.outlet_id == outlet_id)
         .filter(RestaurantMenuItem.is_active == True)
     )
@@ -376,7 +375,6 @@ def get_modifier_groups(
 ):
     return (
         db.query(RestaurantModifierGroup)
-        .options(joinedload(RestaurantModifierGroup.options))
         .filter(RestaurantModifierGroup.outlet_id == outlet_id)
         .filter(RestaurantModifierGroup.is_active == True)
         .all()

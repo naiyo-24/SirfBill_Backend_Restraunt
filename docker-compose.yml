@@ -1,4 +1,4 @@
-name: sirfbill_restraunt
+name: sirfbill_restraunt_backend
 
 services:
   # --------------------------------------------------------
@@ -6,7 +6,7 @@ services:
   # --------------------------------------------------------
   db:
     image: postgres:15-alpine
-    container_name: sirfbill_restraunt_db
+    container_name: sirfbill_restraunt_backend_db
     restart: always
     env_file:
       - .env
@@ -14,9 +14,6 @@ services:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ${DB_NAME:-sirfbill_restraunt}
-    ports:
-      # Bind to 127.0.0.1 on the host for security (prevents public internet database scans on VPS)
-      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - sirfbill_restraunt_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -33,7 +30,7 @@ services:
   # --------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: sirfbill_restraunt_pgadmin
+    container_name: sirfbill_restraunt_backend_pgadmin
     restart: always
     env_file:
       - .env
@@ -78,8 +75,8 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
-      - sirfbill_restraunt_uploads_data:/app/uploads
-      - sirfbill_restraunt_downloads_data:/app/downloads
+      - ./uploads:/app/uploads
+      - ./downloads:/app/downloads
     networks:
       - sirfbill_restraunt_network
 
@@ -90,10 +87,6 @@ volumes:
   sirfbill_restraunt_db_data:
     driver: local
   sirfbill_restraunt_pgadmin_data:
-    driver: local
-  sirfbill_restraunt_uploads_data:
-    driver: local
-  sirfbill_restraunt_downloads_data:
     driver: local
 
 # --------------------------------------------------------
