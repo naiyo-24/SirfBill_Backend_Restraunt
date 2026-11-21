@@ -7,8 +7,8 @@
   "mandatory": false,
   "is_mandatory": false,
   "release_notes": "• SirfBill Restaurant Release v1.0.13\n• Performance and auto-update enhancements",
-  "package_url": "https://github.com/sayar2121/SirfBill_Restraunt/releases/download/v1.0.13/app-update.zip",
-  "download_url": "https://github.com/sayar2121/SirfBill_Restraunt/releases/download/v1.0.13/Sirfbill_Restaurant_Setup.exe",
+  "package_url": "https://github.com/naiyo-24/SirfBill_Restraunt/releases/download/v1.0.13/app-update.zip",
+  "download_url": "https://github.com/naiyo-24/SirfBill_Restraunt/releases/download/v1.0.13/Sirfbill_Restaurant_Setup.exe",
   "sha256": "",
   "signature_url": ""
 }

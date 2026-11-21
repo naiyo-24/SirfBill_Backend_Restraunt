@@ -13,7 +13,7 @@ router = APIRouter(
 VERSION_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app_version.json")
 
 def get_github_repo() -> str:
-    return os.getenv("GITHUB_REPO", "sayar2121/SirfBill_Restraunt").strip()
+    return os.getenv("GITHUB_REPO", "naiyo-24/SirfBill_Restraunt").strip()
 
 # In-memory cache for live GitHub version info (5 min TTL)
 _cached_version_data = None
