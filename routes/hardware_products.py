@@ -78,6 +78,7 @@ CATEGORY_METADATA = {
 def get_hardware_categories(db: Session = Depends(get_db)):
     """
     List all hardware categories with product counts and UI metadata.
+    Includes 'ALL' as the first category for unified catalog views.
     """
     counts = (
         db.query(HardwareProduct.category, func.count(HardwareProduct.id))
@@ -86,8 +87,17 @@ def get_hardware_categories(db: Session = Depends(get_db)):
         .all()
     )
     count_map = {row[0].upper(): row[1] for row in counts}
+    total_count = sum(count_map.values())
 
-    results = []
+    results = [
+        HardwareCategorySummary(
+            category="ALL",
+            title="All Hardware",
+            count=total_count,
+            icon="storefront",
+            description="Browse complete catalog of all certified POS terminals, printers, KDS, handhelds, and accessories."
+        )
+    ]
     for cat_code, meta in CATEGORY_METADATA.items():
         results.append(
             HardwareCategorySummary(
@@ -118,8 +128,8 @@ def get_hardware_products(
     """
     query = db.query(HardwareProduct).filter(HardwareProduct.is_active == True)
 
-    if category:
-        query = query.filter(HardwareProduct.category == category.upper())
+    if category and category.strip().upper() != "ALL":
+        query = query.filter(HardwareProduct.category == category.strip().upper())
     if brand:
         query = query.filter(HardwareProduct.brand.ilike(f"%{brand}%"))
     if in_stock_only:
