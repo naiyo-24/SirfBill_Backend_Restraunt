@@ -7,6 +7,9 @@ import aiofiles
 from schemas.user import UserCreate, UserUpdate, User as UserSchema, UserAddress
 from crud import user as crud_user
 from models.database import get_db
+from models.user import User
+from models.restaurant_outlet import RestaurantOutlet
+from dependencies import get_optional_current_user
 
 from typing import List, Optional
 
@@ -69,11 +72,27 @@ def get_users(
 @router.post("/create", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
 @admin_router.post("", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
 @admin_router.post("/create", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    from models.user import User
-    from models.restaurant_outlet import RestaurantOutlet
-
+def create_user(
+    user: UserCreate, 
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+):
     target_branch = user.outlet_id or user.branch_id or getattr(user, 'shop_id', None)
+
+    # 0. Automatically resolve tenant_id if omitted
+    resolved_tenant_id = user.tenant_id
+    if not resolved_tenant_id and target_branch:
+        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_branch).first()
+        if outlet and outlet.tenant_id:
+            resolved_tenant_id = outlet.tenant_id
+
+    if not resolved_tenant_id and current_user and current_user.tenant_id:
+        resolved_tenant_id = current_user.tenant_id
+
+    if not resolved_tenant_id:
+        active_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id.isnot(None)).first()
+        if active_outlet:
+            resolved_tenant_id = active_outlet.tenant_id
 
     # 1. If email/username provided, check or update existing
     if user.email:
@@ -85,6 +104,8 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
             existing.name = user.name
             if target_branch:
                 existing.outlet_id = target_branch
+            if resolved_tenant_id and (not existing.tenant_id or existing.tenant_id != resolved_tenant_id):
+                existing.tenant_id = resolved_tenant_id
             db.commit()
             db.refresh(existing)
             resp = UserSchema.model_validate(existing)
@@ -97,7 +118,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
 
     # 2. Check if a user with this phone number already exists (only for USER role)
     if user.phone and user.role.upper() == "USER":
-        db_user = crud_user.get_user_by_phone(db, phone=user.phone, tenant_id=user.tenant_id)
+        db_user = crud_user.get_user_by_phone(db, phone=user.phone, tenant_id=resolved_tenant_id or user.tenant_id)
         if db_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -109,8 +130,10 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     allowed_cols = {"id", "tenant_id", "outlet_id", "role", "phone", "name", "email", "password", "avatar_url", "saved_addresses", "is_active", "location", "created_at"}
     filtered_kwargs = {k: v for k, v in user_dict.items() if k in allowed_cols}
     filtered_kwargs["role"] = user.role.upper()
-    if target_branch and "outlet_id" not in filtered_kwargs:
+    if target_branch:
         filtered_kwargs["outlet_id"] = target_branch
+    if resolved_tenant_id and not filtered_kwargs.get("tenant_id"):
+        filtered_kwargs["tenant_id"] = resolved_tenant_id
     if not filtered_kwargs.get("created_at"):
         filtered_kwargs["created_at"] = datetime.utcnow()
     new_user = User(**filtered_kwargs)

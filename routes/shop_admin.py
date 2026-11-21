@@ -195,6 +195,8 @@ async def create_shop(
             existing_u.password = upass
             existing_u.role = urole
             existing_u.outlet_id = new_outlet.id
+            if tenant_id:
+                existing_u.tenant_id = tenant_id
 
     # 2. Also persist in Shop table for backward compatibility
     new_shop = Shop(
@@ -410,6 +412,8 @@ async def update_shop(
                         if upass: u_record.password = upass
                         u_record.role = urole
                         u_record.outlet_id = outlet.id
+                        if outlet.tenant_id:
+                            u_record.tenant_id = outlet.tenant_id
                     else:
                         new_u = User(
                             tenant_id=outlet.tenant_id,

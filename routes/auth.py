@@ -120,16 +120,28 @@ def verify_otp(request: VerifyOTPRequest, db: Session = Depends(get_db)):
     
     if not user:
         # Create a new user if they don't exist
+        from models.restaurant_outlet import RestaurantOutlet
+        active_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id.isnot(None)).first()
+        def_tenant_id = active_outlet.tenant_id if active_outlet else None
+
         user = User(
             phone=request.phone,
             name=request.name,
-            role="USER"
+            role="USER",
+            tenant_id=def_tenant_id
         )
         db.add(user)
         db.commit()
         db.refresh(user)
         is_new_user = True
     else:
+        if not user.tenant_id:
+            from models.restaurant_outlet import RestaurantOutlet
+            active_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id.isnot(None)).first()
+            if active_outlet and active_outlet.tenant_id:
+                user.tenant_id = active_outlet.tenant_id
+                db.commit()
+                db.refresh(user)
         is_new_user = False
 
     # Generate JWT
@@ -184,6 +196,12 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
         if user.tenant_id:
             outlet_query = outlet_query.filter(RestaurantOutlet.tenant_id == user.tenant_id)
         outlet = outlet_query.first() or db.query(RestaurantOutlet).first()
+
+    # Self-heal missing tenant_id on staff user
+    if not user.tenant_id and outlet and outlet.tenant_id:
+        user.tenant_id = outlet.tenant_id
+        db.commit()
+        db.refresh(user)
 
     return {
         "message": "Admin Login successful",
