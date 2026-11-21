@@ -36,27 +36,29 @@ A high-performance, multi-tenant, enterprise-grade restaurant management backend
 │
 ├── alembic/                    # Database migrations
 │   ├── env.py                  # Alembic runtime environment
-│   └── versions/               # Schema version migration history (Latest: a1c3e5g7i9k1)
+│   └── versions/               # Single final baseline schema (Latest: b2d4f6h8j0l2)
+│       ├── b2d4f6h8j0l2_final_consolidated_schema.py # Single squashed production baseline
+│       └── archive_legacy/     # Archived incremental migration history
 │
-├── models/                     # SQLAlchemy ORM Models (Tenant-isolated schema)
+├── models/                     # SQLAlchemy ORM Models (Consolidated 40-table schema)
 │   ├── database.py             # Engine, SessionLocal, and Declarative Base
 │   ├── user.py                 # Users & Staff with RBAC roles
 │   ├── restaurant_outlet.py    # Outlets / Branches under master tenant
 │   ├── restaurant_table.py     # Dining tables, sections, and live status
-│   ├── restaurant_menu.py      # Categories & Menu items with stations and pricing
-│   ├── restaurant_modifier.py  # Menu modifiers and add-on options
+│   ├── restaurant_menu.py      # Categories & Menu items with embedded pricing & tax
+│   ├── restaurant_modifier.py  # Menu modifier groups with embedded JSON options
 │   ├── restaurant_order.py     # Order headers with concurrency versioning
 │   ├── restaurant_order_line.py# Order cart line items with prep instructions
 │   ├── restaurant_kitchen.py   # Kitchen Order Tickets (KOT) & prep stations
 │   ├── restaurant_tender.py    # Payment tenders (Cash, UPI, Card, Khata)
 │   ├── restaurant_shift.py     # Cashier shifts, cash drawers, and reconciliation
 │   ├── restaurant_ingredient.py# Raw ingredients, categories, and storage zones
-│   ├── restaurant_recipe.py    # Bill of Materials (BOM) & ingredient recipes
+│   ├── restaurant_recipe.py    # Bill of Materials (BOM) recipes with embedded JSON items
 │   ├── restaurant_stock_ledger.py # Append-only inventory stock ledger
 │   ├── restaurant_stock_audit.py  # Physical stock audit batches & count items
 │   ├── restaurant_stock_transfer.py# Inter-branch stock transfers
 │   ├── restaurant_procurement.py  # Suppliers, Purchase Orders, and Goods Received Notes (GRN)
-│   ├── restaurant_customer.py  # CRM guest master, loyalty rules, Khata, and notifications
+│   ├── restaurant_customer.py  # CRM guest master, loyalty rules, and unified customer ledger
 │   ├── restaurant_subscription.py# Multi-tenant licensing plans & subscription status
 │   ├── hardware_product.py     # Buy Hardware catalog & restaurant equipment orders
 │   ├── shop_settings.py        # Brand settings, GSTIN, FSSAI, logo, and UPI IDs
@@ -177,6 +179,8 @@ flowchart LR
 
 ## 🗄️ Database Models & Entity Relationship Diagram (ERD)
 
+> **Schema Consolidation Note:** The database has been consolidated from 58 tables down to **40 production tables** with a single baseline Alembic migration (`b2d4f6h8j0l2`). Menu pricing is embedded directly in `MENU_ITEMS`, BOM lines are embedded as JSON in `RECIPES`, modifier options are embedded in `MODIFIER_GROUPS`, and customer loyalty + Khata credit are unified in `CUSTOMER_LEDGER`.
+
 ```mermaid
 erDiagram
   TENANTS ||--o{ OUTLETS : owns
@@ -194,13 +198,10 @@ erDiagram
 
   MENU_ITEMS ||--o{ ORDER_LINES : ordered_as
   MENU_ITEMS ||--o{ RECIPES : defined_by
-  RECIPES ||--o{ RECIPE_LINES : requires
-  INGREDIENTS ||--o{ RECIPE_LINES : used_in
   INGREDIENTS ||--o{ STOCK_LEDGER : tracks_movement
 
   CUSTOMERS ||--o{ ORDERS : places
-  CUSTOMERS ||--o{ LOYALTY_LEDGER : earns_burns
-  CUSTOMERS ||--o{ CREDIT_LEDGER : khata_tab
+  CUSTOMERS ||--o{ CUSTOMER_LEDGER : loyalty_and_khata_trail
   CUSTOMERS ||--o{ CRM_NOTIFICATIONS : receives
 
   ORDERS {
@@ -225,6 +226,18 @@ erDiagram
     string kot_status
   }
 
+  MENU_ITEMS {
+    uuid id PK
+    uuid outlet_id FK
+    uuid category_id FK
+    string name
+    string item_type
+    numeric price
+    numeric takeaway_price
+    numeric delivery_price
+    json variant_prices
+  }
+
   INGREDIENTS {
     uuid id PK
     uuid outlet_id FK
@@ -239,6 +252,7 @@ erDiagram
     uuid item_id FK
     string variant_name
     numeric yield_servings
+    json items
   }
 
   CUSTOMERS {
@@ -250,6 +264,17 @@ erDiagram
     numeric total_spent
     int loyalty_points
     numeric credit_balance
+  }
+
+  CUSTOMER_LEDGER {
+    uuid id PK
+    uuid customer_id FK
+    uuid order_id FK
+    string ledger_type
+    string transaction_type
+    int points_delta
+    numeric amount
+    numeric balance_after
   }
 ```
 
@@ -428,9 +453,7 @@ Tracks raw materials, Unit of Measure (UOM) conversions, recipes (Bill of Materi
 ```mermaid
 erDiagram
   INGREDIENT_CATEGORIES ||--o{ INGREDIENTS : classifies
-  INGREDIENTS ||--o{ RECIPE_LINES : used_in
   MENU_ITEMS ||--o{ RECIPES : has_bom
-  RECIPES ||--o{ RECIPE_LINES : requires
   INGREDIENTS ||--o{ STOCK_LEDGER : audits
   INGREDIENTS ||--o{ AUDIT_ITEMS : physically_counted
   STOCK_AUDITS ||--o{ AUDIT_ITEMS : batches
@@ -456,14 +479,7 @@ erDiagram
     uuid item_id FK
     string variant_name
     numeric yield_servings
-  }
-
-  RECIPE_LINES {
-    uuid id PK
-    uuid recipe_id FK
-    uuid ingredient_id FK
-    numeric quantity_required
-    string unit
+    json items
   }
 
   STOCK_LEDGER {
@@ -555,11 +571,9 @@ Unified multi-branch guest wallet, append-only loyalty points ledger, store cred
 erDiagram
   OUTLETS ||--o{ CUSTOMERS : registers
   TENANTS ||--o{ LOYALTY_RULES : configures
-  CUSTOMERS ||--o{ LOYALTY_LEDGER : points_trail
-  CUSTOMERS ||--o{ CREDIT_LEDGER : khata_tab
+  CUSTOMERS ||--o{ CUSTOMER_LEDGER : ledger_trail
   CUSTOMERS ||--o{ CRM_NOTIFICATIONS : dispatches
-  ORDERS ||--o{ LOYALTY_LEDGER : source_order
-  ORDERS ||--o{ CREDIT_LEDGER : order_credit
+  ORDERS ||--o{ CUSTOMER_LEDGER : source_order
 
   CUSTOMERS {
     uuid id PK
@@ -589,23 +603,18 @@ erDiagram
     int points_expiry_days
   }
 
-  LOYALTY_LEDGER {
-    uuid id PK
-    uuid customer_id FK
-    int points_delta
-    int balance_after
-    string reason
-    string idempotency_key
-  }
-
-  CREDIT_LEDGER {
+  CUSTOMER_LEDGER {
     uuid id PK
     uuid customer_id FK
     uuid outlet_id FK
+    uuid order_id FK
+    string ledger_type
     string transaction_type
+    int points_delta
     numeric amount
     numeric balance_after
     string payment_mode
+    string reason
     string idempotency_key
   }
 
@@ -987,6 +996,7 @@ flowchart LR
 ### 🏷️ Hardware Catalog Categories
 | Category Code | Category Title | Typical Devices / Consumables |
 | :--- | :--- | :--- |
+| `ALL` | All Hardware (Default) | Complete catalog of certified POS hardware, printers, terminals, KDS, & accessories |
 | `PRINTER` | Thermal Receipt & KOT Printers | 80mm USB+LAN+BT auto-cutter printers, 58mm Bluetooth mobile printers |
 | `POS_TERMINAL` | All-in-One Touch POS Terminals | 15.6" Dual-screen Intel J4125 touch computers with customer-facing screens |
 | `HANDHELD_PDA` | Captain Handheld Ordering Tablets | Android 12 wireless tablets with integrated 58mm printer for table-side KOT |
@@ -1220,10 +1230,18 @@ PYTHONPATH=. .venv/bin/python scripts/test_crm_and_reports.py
 # 1. Activate Virtual Environment
 source .venv/bin/activate
 
-# 2. Run Database Migrations to Latest Head
+# 2. Run Database Migrations to Latest Head (Single Baseline: b2d4f6h8j0l2)
 alembic upgrade head
 
-# 3. Start Development Server
+# 3. Check Current Migration Status
+alembic current
+# Output: b2d4f6h8j0l2 (head)
+
+# 4. Run Test Suite
+PYTHONPATH=. .venv/bin/python scripts/test_hardware.py
+PYTHONPATH=. .venv/bin/python scripts/test_crm_and_reports.py
+
+# 5. Start Development Server
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
