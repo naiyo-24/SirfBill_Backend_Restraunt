@@ -1191,6 +1191,9 @@ def render_subscription_invoice_html(sub: TenantSubscription, db: Session, autop
     # 6. Embed brand logo as base64 for 100% self-contained PDF rendering
     brand_logo_b64 = None
     for logo_file in [
+        "uploads/brand/LOGO.png",
+        os.path.join(os.getcwd(), "uploads", "brand", "LOGO.png"),
+        "/app/uploads/brand/LOGO.png",
         "uploads/brand/sirfbill_logo.png",
         "assets/sirfbill_logo.png",
         os.path.join(os.getcwd(), "uploads", "brand", "sirfbill_logo.png"),
@@ -1262,7 +1265,7 @@ def render_subscription_invoice_html(sub: TenantSubscription, db: Session, autop
         "phone": "+91 6289171798",
         "email": "naiyooffice@gmail.com",
         "website": "www.naiyo24.com",
-        "logo_url": brand_logo_b64 or "/uploads/brand/sirfbill_logo.png",
+        "logo_url": brand_logo_b64 or "/uploads/brand/LOGO.png",
         "icon_url": brand_icon_b64 or "/uploads/brand/sirfbill_icon.png"
     }
 
