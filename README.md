@@ -36,7 +36,7 @@ A high-performance, multi-tenant, enterprise-grade restaurant management backend
 │
 ├── alembic/                    # Database migrations
 │   ├── env.py                  # Alembic runtime environment
-│   └── versions/               # Schema version migration history (Latest: f2d4b6a8c0e2)
+│   └── versions/               # Schema version migration history (Latest: a1c3e5g7i9k1)
 │
 ├── models/                     # SQLAlchemy ORM Models (Tenant-isolated schema)
 │   ├── database.py             # Engine, SessionLocal, and Declarative Base
@@ -58,6 +58,7 @@ A high-performance, multi-tenant, enterprise-grade restaurant management backend
 │   ├── restaurant_procurement.py  # Suppliers, Purchase Orders, and Goods Received Notes (GRN)
 │   ├── restaurant_customer.py  # CRM guest master, loyalty rules, Khata, and notifications
 │   ├── restaurant_subscription.py# Multi-tenant licensing plans & subscription status
+│   ├── hardware_product.py     # Buy Hardware catalog & restaurant equipment orders
 │   ├── shop_settings.py        # Brand settings, GSTIN, FSSAI, logo, and UPI IDs
 │   └── restaurant_audit.py     # POS audit trail (voids, overrides, reprints, refunds)
 │
@@ -77,6 +78,7 @@ A high-performance, multi-tenant, enterprise-grade restaurant management backend
 │   ├── restaurant_crm.py       # Customer directory, RFM insights, loyalty earn/burn, and Khata
 │   ├── restaurant_reports.py   # Sales reports and the 5 Executive Financial Costing reports
 │   ├── restaurant_subscriptions.py # Platform licensing, subscription status, and renewals
+│   ├── hardware_products.py    # Buy Hardware catalog, equipment ordering, and device specs
 │   └── shop_settings.py        # Outlet brand profile, legal details, and bill settings
 │
 ├── schemas/                    # Pydantic Schemas (Request/Response validation)
@@ -915,6 +917,99 @@ $$\text{Days Remaining} = \text{End Date} - \text{Current Date}$$
 - **ACTIVE:** $\text{Days Remaining} > 0$
 - **GRACE-PERIOD:** $-3 \le \text{Days Remaining} \le 0$
 - **EXPIRED:** $\text{Days Remaining} < -3$
+
+---
+
+## 7. 🛒 Buy Hardware & POS Equipment Marketplace Module
+
+Enables restaurant owners to browse certified hardware devices (thermal receipt printers, all-in-one touch POS terminals, captain handheld PDAs, electronic cash drawers, barcode/QR scanners, KDS screens, and thermal paper rolls) with complete technical specifications, transparent pricing, GST billing, and one-click purchase ordering / demo inquiries directly from their portal.
+
+### 🗄️ Hardware Marketplace Data Models & Relationship Diagram
+
+```mermaid
+erDiagram
+  TENANTS ||--o{ HARDWARE_ORDERS : places_order
+  OUTLETS ||--o{ HARDWARE_ORDERS : delivery_destination
+  HARDWARE_PRODUCTS ||--o{ HARDWARE_ORDERS : purchased_item
+
+  HARDWARE_PRODUCTS {
+    uuid id PK
+    string sku UK
+    string name
+    string category
+    string brand
+    string model_number
+    numeric price
+    numeric mrp
+    numeric discount_pct
+    numeric tax_rate
+    json specifications
+    json features
+    int stock_quantity
+    boolean in_stock
+    int warranty_months
+    boolean is_popular
+    boolean is_featured
+    boolean is_active
+  }
+
+  HARDWARE_ORDERS {
+    uuid id PK
+    uuid tenant_id FK
+    uuid outlet_id FK
+    uuid product_id FK
+    string order_number UK
+    int quantity
+    numeric unit_price
+    numeric total_price
+    string contact_name
+    string contact_phone
+    string shipping_address
+    string status
+    string payment_status
+    string tracking_number
+    string courier_partner
+  }
+```
+
+#### Hardware Purchase & Fulfillment Pipeline
+```mermaid
+flowchart LR
+  Browse[Restaurant Dashboard: Buy Hardware] --> Select[Select Product & View Specs]
+  Select --> Order[Place Purchase Order / Demo Inquiry]
+  Order --> AutoSeq[Generate HWO-YYYYMM-XXXX]
+  AutoSeq --> StatusNew[Status: NEW / Order Received]
+  StatusNew --> Dispatch[Admin: Invoiced & Shipped via Blue Dart]
+  Dispatch --> Tracking[Tracking Number Shared with Restaurant]
+  Tracking --> Delivered[Status: DELIVERED]
+```
+
+### 🏷️ Hardware Catalog Categories
+| Category Code | Category Title | Typical Devices / Consumables |
+| :--- | :--- | :--- |
+| `PRINTER` | Thermal Receipt & KOT Printers | 80mm USB+LAN+BT auto-cutter printers, 58mm Bluetooth mobile printers |
+| `POS_TERMINAL` | All-in-One Touch POS Terminals | 15.6" Dual-screen Intel J4125 touch computers with customer-facing screens |
+| `HANDHELD_PDA` | Captain Handheld Ordering Tablets | Android 12 wireless tablets with integrated 58mm printer for table-side KOT |
+| `KDS_DISPLAY` | Kitchen Display System Screens | 21.5" Steam & grease-resistant full HD screens for kitchen cooking status |
+| `CASH_DRAWER` | Electronic Cash Drawers | Heavy-duty steel drawers with 5 notes / 8 coins compartments & RJ11 trigger |
+| `SCANNER` | 1D / 2D Barcode & QR Scanners | Wireless 2.4GHz + Bluetooth barcode scanners with induction charging cradles |
+| `PAPER_ROLLS` | Thermal Paper Rolls & Consumables | Premium 80mm x 50m and 58mm BPA-free high-density paper cartons (Box of 50) |
+| `ACCESSORY` | Hardware Accessories & Cables | RJ11 cash drawer cables, USB extension hubs, VESA KDS wall mounts |
+
+### 🔌 API Endpoints
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/hardware/categories` | List hardware categories with product counts and UI icons |
+| `GET` | `/api/hardware/products` | Browse hardware catalog (filters: `category`, `search`, `in_stock_only`, `popular_only`) |
+| `GET` | `/api/hardware/products/{product_id}` | Fetch full hardware specs, bullet points, high-res images, and warranty terms |
+| `POST` | `/api/hardware/products` | Add a new hardware product listing with specifications and stock (Admin) |
+| `PATCH` | `/api/hardware/products/{product_id}` | Update product pricing, discount, stock quantity, or gallery images (Admin) |
+| `DELETE`| `/api/hardware/products/{product_id}` | Soft-deactivate a hardware product listing |
+| `POST` | `/api/hardware/orders` | Place a hardware purchase order / request demo inquiry |
+| `GET` | `/api/hardware/orders` | List hardware orders placed by current restaurant tenant |
+| `GET` | `/api/hardware/orders/{order_id}` | Check hardware order dispatch status, courier partner, and tracking number |
+| `PATCH` | `/api/hardware/orders/{order_id}` | Update order status (`CONFIRMED`, `SHIPPED`, `DELIVERED`) and courier tracking (Admin) |
+| `POST` | `/api/hardware/seed` | Auto-seed curated restaurant hardware catalog if empty |
 
 ---
 

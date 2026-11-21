@@ -56,6 +56,7 @@ from .restaurant_stock_transfer import RestaurantStockTransfer, RestaurantStockT
 from .restaurant_stock_audit import RestaurantStockAudit, RestaurantStockAuditItem
 from .restaurant_customer import RestaurantCustomer, RestaurantLoyaltyLedger
 from .restaurant_subscription import SubscriptionPlan, TenantSubscription, SubscriptionPayment
+from .hardware_product import HardwareProduct, HardwareOrder
 
 
 
