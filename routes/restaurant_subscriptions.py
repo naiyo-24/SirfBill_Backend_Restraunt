@@ -1190,22 +1190,64 @@ def render_subscription_invoice_html(sub: TenantSubscription, db: Session, autop
 
     # 6. Embed brand logo as base64 for 100% self-contained PDF rendering
     brand_logo_b64 = None
-    logo_file = "uploads/brand/sirfbill_logo.png"
-    if os.path.exists(logo_file):
-        try:
-            with open(logo_file, "rb") as f:
-                brand_logo_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
-        except Exception:
-            pass
+    for logo_file in [
+        "uploads/brand/sirfbill_logo.png",
+        "assets/sirfbill_logo.png",
+        os.path.join(os.getcwd(), "uploads", "brand", "sirfbill_logo.png"),
+        os.path.join(os.getcwd(), "assets", "sirfbill_logo.png"),
+        "/app/uploads/brand/sirfbill_logo.png",
+        "/app/assets/sirfbill_logo.png"
+    ]:
+        if os.path.exists(logo_file) and os.path.isfile(logo_file):
+            try:
+                with open(logo_file, "rb") as f:
+                    brand_logo_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
+                if brand_logo_b64:
+                    break
+            except Exception:
+                pass
 
     brand_icon_b64 = None
-    icon_file = "uploads/brand/sirfbill_icon.png"
-    if os.path.exists(icon_file):
-        try:
-            with open(icon_file, "rb") as f:
-                brand_icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
-        except Exception:
-            pass
+    for icon_file in [
+        "uploads/brand/sirfbill_icon.png",
+        "assets/sirfbill_icon.png",
+        os.path.join(os.getcwd(), "uploads", "brand", "sirfbill_icon.png"),
+        os.path.join(os.getcwd(), "assets", "sirfbill_icon.png"),
+        "/app/uploads/brand/sirfbill_icon.png",
+        "/app/assets/sirfbill_icon.png"
+    ]:
+        if os.path.exists(icon_file) and os.path.isfile(icon_file):
+            try:
+                with open(icon_file, "rb") as f:
+                    brand_icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
+                if brand_icon_b64:
+                    break
+            except Exception:
+                pass
+
+    # 7. Embed subscriber outlet logo if present
+    outlet_logo_b64 = None
+    if outlet and outlet.logo_url:
+        clean_path = outlet.logo_url.lstrip("/")
+        for candidate in [
+            clean_path,
+            os.path.join(os.getcwd(), clean_path),
+            os.path.join("/app", clean_path)
+        ]:
+            if os.path.exists(candidate) and os.path.isfile(candidate):
+                try:
+                    with open(candidate, "rb") as f:
+                        ext = os.path.splitext(candidate)[1].lower().replace(".", "")
+                        mime = f"image/{ext}" if ext in ["png", "jpeg", "jpg", "webp"] else "image/jpeg"
+                        if mime == "image/jpg":
+                            mime = "image/jpeg"
+                        outlet_logo_b64 = f"data:{mime};base64,{base64.b64encode(f.read()).decode('utf-8')}"
+                    if outlet_logo_b64:
+                        break
+                except Exception:
+                    pass
+        if not outlet_logo_b64:
+            outlet_logo_b64 = outlet.logo_url
 
     inv_num = sub.invoice_number or f"INV-SUB-{sub.started_at.strftime('%Y%m%d')}-{str(sub.id)[:6].upper()}"
 
@@ -1243,6 +1285,7 @@ def render_subscription_invoice_html(sub: TenantSubscription, db: Session, autop
         user=user,
         calculation=calc,
         signature_url=sig_url,
+        outlet_logo_url=outlet_logo_b64,
         autoprint=autoprint
     )
 

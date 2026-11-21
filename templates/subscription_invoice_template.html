@@ -929,12 +929,18 @@
 
         <div class="party-card">
           <div class="party-card-title">Billed To (Subscriber / Restaurant)</div>
-          <div class="party-name">{{ outlet.name or tenant_name or "Restaurant Super Admin" }}</div>
-          <div class="party-text">{{ outlet.address or "Registered Branch Location" }}</div>
-          <div class="party-text">Contact: <strong>{{ user.phone or outlet.phone or "+91 Registered Mobile" }}</strong>
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;">
+            <div>
+              <div class="party-name">{{ outlet.name or tenant_name or "Restaurant Super Admin" }}</div>
+              <div class="party-text">{{ outlet.address or "Registered Branch Location" }}</div>
+              <div class="party-text">Contact: <strong>{{ user.phone or outlet.phone or "+91 Registered Mobile" }}</strong></div>
+              <div class="party-text">Account Email: <strong>{{ user.email or "superadmin@restaurant.com" }}</strong></div>
+              <div class="party-text">Tenant ID: <strong>{{ invoice.tenant_id }}</strong></div>
+            </div>
+            {% if outlet_logo_url %}
+            <img src="{{ outlet_logo_url }}" alt="Restaurant Logo" style="max-height: 48px; max-width: 96px; object-fit: contain; border-radius: 4px; border: 1px solid #E2E8F0; padding: 2px; background: #ffffff;">
+            {% endif %}
           </div>
-          <div class="party-text">Account Email: <strong>{{ user.email or "superadmin@restaurant.com" }}</strong></div>
-          <div class="party-text">Tenant ID: <strong>{{ invoice.tenant_id }}</strong></div>
         </div>
       </div>
 
