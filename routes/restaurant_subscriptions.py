@@ -319,8 +319,32 @@ def resolve_tenant_id(user: Optional[User], db: Session, target_outlet_id: Optio
     if first_outlet and first_outlet.tenant_id:
         return first_outlet.tenant_id
 
-    # Dev fallback UUID if DB is fresh
-    return uuid.UUID("00a2b6d2-2803-4384-817a-d8bbaa7a0f28")
+    # Fallback to any outlet tenant_id or generate fresh
+    any_outlet = db.query(RestaurantOutlet).first()
+    if any_outlet and any_outlet.tenant_id:
+        return any_outlet.tenant_id
+
+    return uuid.uuid4()
+
+
+def resolve_valid_outlet_id(db: Session, target_outlet_id: Optional[uuid.UUID], tenant_id: Optional[uuid.UUID] = None) -> Optional[uuid.UUID]:
+    """
+    Validates that target_outlet_id exists in restaurant_outlets.
+    If not, falls back to a valid active outlet for the tenant, or None.
+    Guarantees no ForeignKeyViolation on tenant_subscriptions.outlet_id.
+    """
+    if target_outlet_id:
+        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_outlet_id).first()
+        if outlet:
+            return outlet.id
+    if tenant_id:
+        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == tenant_id, RestaurantOutlet.is_active == True).first()
+        if not outlet:
+            outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == tenant_id).first()
+        if outlet:
+            return outlet.id
+    first = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
+    return first.id if first else None
 
 
 def _enrich_subscription_response(sub: TenantSubscription) -> TenantSubscriptionResponse:
@@ -599,9 +623,10 @@ def get_current_subscription(
         # Auto-create a 14-day complimentary trial so fresh restaurant setups work instantly
         default_plan = get_or_create_default_plan(db)
         now = get_current_time()
+        valid_outlet_id = resolve_valid_outlet_id(db, outlet_id, tenant_id)
         sub = TenantSubscription(
             tenant_id=tenant_id,
-            outlet_id=outlet_id,
+            outlet_id=valid_outlet_id,
             plan_id=default_plan.id,
             status="TRIAL",
             price_paid=Decimal("0.00"),
@@ -659,11 +684,12 @@ def subscribe_or_renew(
 
     invoice_no = f"INV-SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
     payment_ref = payload.payment_reference or f"UPI-PAY-{uuid.uuid4().hex[:8].upper()}"
+    valid_outlet_id = resolve_valid_outlet_id(db, payload.outlet_id, tenant_id)
 
     # 3. Create or update tenant subscription record
     subscription = TenantSubscription(
         tenant_id=tenant_id,
-        outlet_id=payload.outlet_id,
+        outlet_id=valid_outlet_id,
         plan_id=plan.id,
         status="ACTIVE",
         price_paid=total_price,
@@ -867,10 +893,11 @@ def verify_razorpay_payment(
         new_expiry = now + timedelta(days=duration_days)
 
     invoice_no = f"INV-SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    valid_outlet_id = resolve_valid_outlet_id(db, payload.outlet_id, tenant_id)
 
     subscription = TenantSubscription(
         tenant_id=tenant_id,
-        outlet_id=payload.outlet_id,
+        outlet_id=valid_outlet_id,
         plan_id=plan.id,
         status="ACTIVE",
         price_paid=total_price,
@@ -1067,10 +1094,11 @@ def grant_trial_extension(
         new_expiry = now + timedelta(days=days)
 
     invoice_no = f"TRIAL-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    valid_outlet_id = resolve_valid_outlet_id(db, outlet_id, tenant_id)
 
     sub = TenantSubscription(
         tenant_id=tenant_id,
-        outlet_id=outlet_id,
+        outlet_id=valid_outlet_id,
         plan_id=plan.id,
         status="TRIAL",
         price_paid=Decimal("0.00"),

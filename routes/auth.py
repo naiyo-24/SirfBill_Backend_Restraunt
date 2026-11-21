@@ -197,11 +197,21 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
             outlet_query = outlet_query.filter(RestaurantOutlet.tenant_id == user.tenant_id)
         outlet = outlet_query.first() or db.query(RestaurantOutlet).first()
 
-    # Self-heal missing tenant_id on staff user
+    # Self-heal missing tenant_id or orphan outlet_id on user
+    updated = False
     if not user.tenant_id and outlet and outlet.tenant_id:
         user.tenant_id = outlet.tenant_id
+        updated = True
+    if outlet and user.outlet_id != outlet.id:
+        existing_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id).first() if user.outlet_id else None
+        if not existing_outlet:
+            user.outlet_id = outlet.id
+            updated = True
+    if updated:
         db.commit()
         db.refresh(user)
+
+    resolved_outlet_id = str(outlet.id) if outlet else (str(user.outlet_id) if user.outlet_id else None)
 
     return {
         "message": "Admin Login successful",
@@ -212,8 +222,8 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
         "name": user.name,
         "email": user.email,
         "tenant_id": str(user.tenant_id) if user.tenant_id else None,
-        "outlet_id": str(user.outlet_id) if user.outlet_id else (str(outlet.id) if outlet else None),
-        "assigned_outlet_id": str(user.outlet_id) if user.outlet_id else None,
+        "outlet_id": resolved_outlet_id,
+        "assigned_outlet_id": resolved_outlet_id,
         "outlet": {
             "id": str(outlet.id) if outlet else None,
             "name": outlet.name if outlet else "SirfBill Grand Restaurant",
