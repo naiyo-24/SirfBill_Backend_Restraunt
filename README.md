@@ -1245,8 +1245,31 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Interactive API documentation will be available at:
-- **Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- **Swagger UI:** [http://localhost:8033/docs](http://localhost:8033/docs)
+- **ReDoc:** [http://localhost:8033/redoc](http://localhost:8033/redoc)
+
+---
+
+## 🐳 Running with Docker Compose (Continuous Multi-Container)
+
+To run the complete continuous production/development stack (PostgreSQL 15 + pgAdmin 4 + SirfBill Backend on port 8033 & 8034):
+
+```bash
+# 1. Build and start all services in continuous detached mode
+docker-compose up --build -d
+
+# 2. View streaming logs
+docker-compose logs -f backend
+
+# 3. Stop services
+docker-compose down
+```
+
+### Exposed Container Endpoints:
+- **FastAPI Restaurant Backend:** [http://localhost:8033](http://localhost:8033)
+- **Interactive Swagger Docs:** [http://localhost:8033/docs](http://localhost:8033/docs)
+- **pgAdmin 4 Web Console:** [http://localhost:8034](http://localhost:8034) (Email: `admin@sirfbill.com` / Password: `admin123`)
+- **PostgreSQL Database:** `localhost:5432` (DB: `sirfbill_restraunt`, User: `postgres`)
 
 ---
 
