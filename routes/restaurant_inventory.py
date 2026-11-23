@@ -2048,7 +2048,7 @@ def get_food_cost_reconciliation(
         order_query = order_query.filter(RestaurantOrder.outlet_id == target_outlet.id)
 
     orders = order_query.all()
-    total_sales_inr = sum([Decimal(str(o.grand_total or 0.00)) for o in orders])
+    total_sales_inr = sum([Decimal(str(o.grand_total or 0.00)) for o in orders], Decimal("0.00"))
 
     # 2. Stock Ledger movements
     ledger_query = (

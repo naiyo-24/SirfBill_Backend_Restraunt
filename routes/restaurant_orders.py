@@ -963,6 +963,10 @@ def transition_order_status(
     order.status = new_status
     order.version += 1
 
+    reason_val = getattr(payload, "reason", None) if payload else None
+    if reason_val is None and isinstance(payload, dict):
+        reason_val = payload.get("reason")
+
     # Reverse inventory stock for items already sent to kitchen (Point 2: Reversal vs Wastage)
     if new_status in ["CANCELLED", "VOIDED"]:
         is_waste = False
@@ -1009,10 +1013,6 @@ def transition_order_status(
             table.status = "VACANT"
 
     # Audit log
-    reason_val = getattr(payload, "reason", None)
-    if reason_val is None and isinstance(payload, dict):
-        reason_val = payload.get("reason")
-
     audit = RestaurantAuditEvent(
         outlet_id=order.outlet_id,
         tenant_id=order.tenant_id,

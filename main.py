@@ -494,7 +494,7 @@ from routes.user import router as user_router, admin_router as user_admin_router
 # from routes.lab_catalog import router as lab_catalog_router
 # from routes.lab_booking import router as lab_booking_router
 # from routes.story import router as story_router
-from routes.auth import router as auth_router
+from routes.auth import router as auth_router, alias_router as auth_alias_router
 # Legacy payment, pos, accounts, and purchase routers retired for consolidated Restaurant platform
 # from routes.payment import router as payment_router
 # from routes.dashboard import router as dashboard_router
@@ -529,6 +529,7 @@ app.include_router(user_admin_router)
 # app.include_router(lab_booking_router)
 # app.include_router(story_router)
 app.include_router(auth_router)
+app.include_router(auth_alias_router)
 # app.include_router(payment_router)
 # app.include_router(dashboard_router)
 # app.include_router(banner_router)
