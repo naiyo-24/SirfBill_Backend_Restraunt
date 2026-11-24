@@ -27,14 +27,10 @@ router = APIRouter(
     tags=["Restaurant - Stock Transfers"]
 )
 
-def resolve_outlet(db: Session, outlet_id: Optional[UUID] = None) -> RestaurantOutlet:
-    outlet = None
-    if outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == outlet_id).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
+def resolve_outlet(db: Session, outlet_id: Optional[UUID] = None, current_user: Optional[User] = None) -> RestaurantOutlet:
+    from dependencies import get_user_scoped_outlet_id
+    scoped_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_id).first() if scoped_id else None
     if not outlet:
         raise HTTPException(status_code=404, detail="Restaurant outlet/branch not found")
     return outlet
@@ -182,7 +178,7 @@ def get_next_transfer_number(
     """
     Returns the next sequential transfer number for the current month.
     """
-    outlet = resolve_outlet(db, outlet_id)
+    outlet = resolve_outlet(db, outlet_id, current_user)
     next_number = generate_transfer_number(db, outlet.tenant_id)
     return {"transfer_number": next_number}
 
@@ -232,8 +228,8 @@ def create_stock_transfer(
     if not payload.items:
         raise HTTPException(status_code=400, detail="Transfer must contain at least one item")
 
-    from_outlet = resolve_outlet(db, payload.from_outlet_id)
-    to_outlet = resolve_outlet(db, payload.to_outlet_id) if payload.to_outlet_id else from_outlet
+    from_outlet = resolve_outlet(db, payload.from_outlet_id, current_user)
+    to_outlet = resolve_outlet(db, payload.to_outlet_id, current_user) if payload.to_outlet_id else from_outlet
 
     transfer_type = (payload.transfer_type or "INTER_BRANCH").upper()
     if from_outlet.id == to_outlet.id:

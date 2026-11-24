@@ -166,6 +166,9 @@ def get_customers(
     target_outlet = outlet_id or current_user.outlet_id
     query = db.query(RestaurantCustomer).filter(RestaurantCustomer.is_active == True)
 
+    if current_user and current_user.tenant_id:
+        query = query.filter(RestaurantCustomer.tenant_id == current_user.tenant_id)
+
     if target_outlet:
         query = query.filter(
             or_(
@@ -173,8 +176,6 @@ def get_customers(
                 RestaurantCustomer.home_outlet_id == target_outlet
             )
         )
-    elif current_user.tenant_id:
-        query = query.filter(RestaurantCustomer.tenant_id == current_user.tenant_id)
 
     if search:
         s = f"%{search.strip()}%"

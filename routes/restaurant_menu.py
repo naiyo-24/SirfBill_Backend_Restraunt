@@ -358,13 +358,16 @@ def delete_menu_item(
 
 @router.get("/modifier-groups", response_model=List[RestaurantModifierGroupResponse])
 def get_modifier_groups(
-    outlet_id: UUID,
+    outlet_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_restaurant_staff)
 ):
+    target_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    if not target_outlet_id:
+        return []
     return (
         db.query(RestaurantModifierGroup)
-        .filter(RestaurantModifierGroup.outlet_id == outlet_id)
+        .filter(RestaurantModifierGroup.outlet_id == target_outlet_id)
         .filter(RestaurantModifierGroup.is_active == True)
         .all()
     )
@@ -375,12 +378,13 @@ def create_modifier_group(
     db: Session = Depends(get_db),
     manager_user: User = Depends(get_restaurant_manager)
 ):
-    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == payload.outlet_id).first()
+    scoped_outlet_id = get_user_scoped_outlet_id(db, manager_user, payload.outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first() if scoped_outlet_id else None
     if not outlet:
-        raise HTTPException(status_code=404, detail="Restaurant outlet not found")
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found for this tenant")
 
     group = RestaurantModifierGroup(
-        outlet_id=payload.outlet_id,
+        outlet_id=outlet.id,
         tenant_id=outlet.tenant_id,
         name=payload.name,
         description=payload.description,
@@ -420,14 +424,9 @@ def download_sample_menu_template(
     for Category (outlet-specific), Type (VEG/NON_VEG), Prep Station, and Availability.
     Zero pre-filled dishes - completely blank for user input.
     """
-    # 1. Resolve Target Outlet
-    target_outlet = None
-    if outlet_id:
-        target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == outlet_id).first()
-    if not target_outlet and current_user and current_user.outlet_id:
-        target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == current_user.outlet_id).first()
-    if not target_outlet:
-        target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first() or db.query(RestaurantOutlet).first()
+    # 1. Resolve Target Outlet (strictly scoped to user tenant)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first() if scoped_outlet_id else None
 
     outlet_name = target_outlet.name if target_outlet else "Restaurant"
     slug = re.sub(r'[^a-zA-Z0-9]+', '_', outlet_name).strip('_').lower()
@@ -608,19 +607,12 @@ async def bulk_upload_menu_items(
             detail="Only Excel (.xlsx, .xls) and CSV files are supported for bulk menu upload."
         )
 
-    # 1. Resolve Target Outlet & Tenant
-    target_outlet = None
-    if outlet_id:
-        target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == outlet_id).first()
-    
-    if not target_outlet and current_user and current_user.outlet_id:
-        target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == current_user.outlet_id).first()
-        
-    if not target_outlet:
-        target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first() or db.query(RestaurantOutlet).first()
+    # 1. Resolve Target Outlet & Tenant (strictly scoped to user tenant)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    target_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first() if scoped_outlet_id else None
 
     if not target_outlet:
-        raise HTTPException(status_code=404, detail="No active restaurant outlet found to assign menu items.")
+        raise HTTPException(status_code=404, detail="No active restaurant outlet found for this tenant to assign menu items.")
 
     resolved_outlet_id = target_outlet.id
     resolved_tenant_id = target_outlet.tenant_id or (current_user.tenant_id if current_user else None) or target_outlet.id

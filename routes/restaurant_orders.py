@@ -23,7 +23,10 @@ from schemas.restaurant_order import (
     RestaurantOrderItemVoid, RestaurantOrderResponse, RestaurantOrderLineResponse
 )
 from schemas.restaurant_kitchen import KitchenTicketResponse
-from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
+from dependencies import (
+    get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff,
+    get_user_scoped_outlet_id
+)
 from utils.restaurant_thermal_printer import generate_kot_pdf, generate_bill_pdf
 from utils.restaurant_inventory_helper import resolve_branch_ingredient, normalize_recipe_uom
 from utils.timezone import get_current_time
@@ -104,18 +107,11 @@ def create_order(
         if existing_order:
             return existing_order
 
-    # 2. Validate Outlet & Table
-    outlet = None
-    if payload.outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == payload.outlet_id).first()
-    if not outlet and current_user and current_user.outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == current_user.outlet_id).first()
+    # 2. Validate Outlet & Table (strictly scoped to user tenant)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, payload.outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first() if scoped_outlet_id else None
     if not outlet:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
-    if not outlet:
-        raise HTTPException(status_code=404, detail="Restaurant outlet not found")
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found for this tenant")
 
     resolved_table_id = None
     if payload.table_id:
@@ -254,22 +250,17 @@ def get_orders(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    target_outlet_id = outlet_id
-    if not target_outlet_id and current_user and current_user.outlet_id:
-        target_outlet_id = current_user.outlet_id
-    if not target_outlet_id:
-        first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-        if first_outlet:
-            target_outlet_id = first_outlet.id
+    target_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
 
     query = (
         db.query(RestaurantOrder)
         .options(joinedload(RestaurantOrder.lines))
     )
+    if current_user and current_user.tenant_id:
+        query = query.filter(RestaurantOrder.tenant_id == current_user.tenant_id)
+
     if target_outlet_id and not (customer_phone or customer_id):
         query = query.filter(RestaurantOrder.outlet_id == target_outlet_id)
-    elif current_user and current_user.tenant_id:
-        query = query.filter(RestaurantOrder.tenant_id == current_user.tenant_id)
     elif target_outlet_id:
         query = query.filter(RestaurantOrder.outlet_id == target_outlet_id)
 

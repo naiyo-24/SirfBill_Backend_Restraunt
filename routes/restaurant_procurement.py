@@ -68,14 +68,10 @@ STATUS_LABELS = {
 }
 
 
-def resolve_outlet(db: Session, outlet_id: Optional[UUID] = None) -> RestaurantOutlet:
-    outlet = None
-    if outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == outlet_id).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
+def resolve_outlet(db: Session, outlet_id: Optional[UUID] = None, current_user: Optional[User] = None) -> RestaurantOutlet:
+    from dependencies import get_user_scoped_outlet_id
+    scoped_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_id).first() if scoped_id else None
     if not outlet:
         raise HTTPException(status_code=404, detail="Restaurant branch/outlet not found")
     return outlet
@@ -147,7 +143,7 @@ def get_suppliers(
     Fetch all suppliers/vendors for a branch.
     Strictly isolated by outlet_id & tenant_id.
     """
-    outlet = resolve_outlet(db, outlet_id)
+    outlet = resolve_outlet(db, outlet_id, current_user)
 
     query = (
         db.query(RestaurantSupplier)
@@ -177,7 +173,7 @@ def create_supplier(
     db: Session = Depends(get_db),
     manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    outlet = resolve_outlet(db, payload.outlet_id)
+    outlet = resolve_outlet(db, payload.outlet_id, manager_user)
 
     code = payload.code.strip().upper() if payload.code and payload.code.strip() else generate_supplier_code(db, outlet.id, payload.name)
 
@@ -266,7 +262,7 @@ def get_next_po_number_endpoint(
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
     """Returns the preview of the next sequential PO number."""
-    outlet = resolve_outlet(db, outlet_id)
+    outlet = resolve_outlet(db, outlet_id, current_user)
     return {"po_number": generate_next_po_number(db, outlet.id), "outlet_id": outlet.id}
 
 
@@ -283,7 +279,7 @@ def get_purchase_orders(
     List purchase orders for a branch with progress percentage and item counts.
     Supports both database enums (ISSUED, PARTIALLY_RECEIVED) and frontend tab names ('Sent to Vendor', 'Partial Delivery').
     """
-    outlet = resolve_outlet(db, outlet_id)
+    outlet = resolve_outlet(db, outlet_id, current_user)
 
     query = (
         db.query(RestaurantPurchaseOrder)
@@ -381,7 +377,7 @@ def create_purchase_order(
     Safeguards against race conditions on PO numbers using database row-level locking.
     Validates branch isolation for supplier and all ingredients.
     """
-    outlet = resolve_outlet(db, payload.outlet_id)
+    outlet = resolve_outlet(db, payload.outlet_id, manager_user)
 
     supplier = db.query(RestaurantSupplier).filter(
         RestaurantSupplier.id == payload.supplier_id,
@@ -804,7 +800,7 @@ def get_next_grn_number_endpoint(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    outlet = resolve_outlet(db, outlet_id)
+    outlet = resolve_outlet(db, outlet_id, current_user)
     return {"grn_number": generate_next_grn_number(db, outlet.id), "outlet_id": outlet.id}
 
 
@@ -847,7 +843,7 @@ def get_grn_list(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    outlet = resolve_outlet(db, outlet_id)
+    outlet = resolve_outlet(db, outlet_id, current_user)
 
     query = (
         db.query(RestaurantGRN)
@@ -943,7 +939,7 @@ def receive_goods(
     5. Creates append-only records in RestaurantStockLedger (PURCHASE_RECEIVED).
     6. Atomically updates PO line item fulfillment and PO status (PARTIAL/COMPLETED).
     """
-    outlet = resolve_outlet(db, payload.outlet_id)
+    outlet = resolve_outlet(db, payload.outlet_id, manager_user)
 
     supplier = db.query(RestaurantSupplier).filter(
         RestaurantSupplier.id == payload.supplier_id,

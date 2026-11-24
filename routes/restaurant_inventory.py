@@ -39,18 +39,14 @@ router = APIRouter(
     tags=["Restaurant - Ingredients & Recipes"]
 )
 
-def resolve_outlet(db: Session, outlet_id: Optional[UUID] = None) -> RestaurantOutlet:
+def resolve_outlet(db: Session, outlet_id: Optional[UUID] = None, current_user: Optional[User] = None) -> RestaurantOutlet:
     """
-    Resolves target outlet. If outlet_id is not passed, falls back to first active outlet.
-    Ensures data is strictly isolated to that specific branch.
+    Resolves target outlet with strict tenant scoping.
+    Guarantees inventory and recipes are strictly isolated to the user's restaurant tenant.
     """
-    outlet = None
-    if outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == outlet_id).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
+    from dependencies import get_user_scoped_outlet_id
+    scoped_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_id).first() if scoped_id else None
     if not outlet:
         raise HTTPException(status_code=404, detail="Restaurant branch/outlet not found")
     return outlet
