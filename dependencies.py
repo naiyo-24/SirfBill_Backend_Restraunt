@@ -156,3 +156,54 @@ def require_active_subscription(
 
     return current_user
 
+
+def get_user_scoped_outlet_id(
+    db: Session,
+    current_user: Optional[User],
+    requested_outlet_id: Optional[UUID] = None
+) -> Optional[UUID]:
+    """
+    Guarantees strict tenant isolation for outlets.
+    If current_user has a tenant_id, the outlet returned MUST belong to current_user.tenant_id.
+    Prevents cross-restaurant data leakage (e.g. seeing another restaurant's menu, orders, tables, or inventory).
+    """
+    from models.restaurant_outlet import RestaurantOutlet
+    from uuid import UUID as PyUUID
+
+    if current_user and current_user.tenant_id:
+        # If user passed a specific outlet_id, verify it belongs to their tenant
+        if requested_outlet_id:
+            valid_outlet = db.query(RestaurantOutlet).filter(
+                RestaurantOutlet.id == requested_outlet_id,
+                RestaurantOutlet.tenant_id == current_user.tenant_id
+            ).first()
+            if valid_outlet:
+                return valid_outlet.id
+        
+        # If user has an assigned outlet_id that belongs to their tenant, use it
+        if current_user.outlet_id:
+            assigned = db.query(RestaurantOutlet).filter(
+                RestaurantOutlet.id == current_user.outlet_id,
+                RestaurantOutlet.tenant_id == current_user.tenant_id
+            ).first()
+            if assigned:
+                return assigned.id
+        
+        # Fallback to the first active outlet of THIS tenant
+        tenant_outlet = db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.tenant_id == current_user.tenant_id,
+            RestaurantOutlet.is_active == True
+        ).first() or db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.tenant_id == current_user.tenant_id
+        ).first()
+        if tenant_outlet:
+            return tenant_outlet.id
+        
+        return None
+        
+    # Unauthenticated fallback (e.g. local dev kiosk mode)
+    if requested_outlet_id:
+        return requested_outlet_id
+    fallback = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
+    return fallback.id if fallback else None
+

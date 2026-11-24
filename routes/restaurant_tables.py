@@ -9,7 +9,10 @@ from models.restaurant_outlet import RestaurantOutlet
 from models.restaurant_table import RestaurantTable
 from models.restaurant_order import RestaurantOrder
 from schemas.restaurant_table import RestaurantTableCreate, RestaurantTableUpdate, RestaurantTableResponse
-from dependencies import get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff
+from dependencies import (
+    get_restaurant_staff, get_restaurant_manager, get_optional_restaurant_staff,
+    get_user_scoped_outlet_id
+)
 
 router = APIRouter(
     prefix="/api/restaurant/tables",
@@ -28,11 +31,9 @@ def get_tables(
     List tables with live status (VACANT, OCCUPIED, RESERVED, CLEANING).
     Automatically maps active orders with their start time and amounts.
     """
+    outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
     if not outlet_id:
-        first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-        if not first_outlet:
-            return []
-        outlet_id = first_outlet.id
+        return []
 
     query = (
         db.query(RestaurantTable)
@@ -86,14 +87,9 @@ def create_table(
     db: Session = Depends(get_db),
     manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    # Auto-resolve outlet_id if not provided
-    outlet = None
-    if payload.outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == payload.outlet_id).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
+    # Auto-resolve outlet_id strictly scoped to user tenant
+    scoped_outlet_id = get_user_scoped_outlet_id(db, manager_user, payload.outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first() if scoped_outlet_id else None
     if not outlet:
         raise HTTPException(status_code=404, detail="No active restaurant outlet found to attach table to.")
 

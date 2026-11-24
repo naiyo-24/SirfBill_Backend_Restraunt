@@ -30,7 +30,10 @@ from schemas.restaurant_modifier import (
     RestaurantModifierGroupCreate, RestaurantModifierGroupResponse,
     RestaurantModifierOptionCreate, RestaurantModifierOptionResponse
 )
-from dependencies import get_current_user, get_restaurant_manager, get_restaurant_staff, get_optional_restaurant_staff
+from dependencies import (
+    get_current_user, get_restaurant_manager, get_restaurant_staff,
+    get_optional_restaurant_staff, get_user_scoped_outlet_id
+)
 
 def generate_short_code(db: Session, outlet_id: UUID, name: str) -> str:
     """
@@ -77,11 +80,9 @@ def get_menu_categories(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
+    outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
     if not outlet_id:
-        first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-        if not first_outlet:
-            return []
-        outlet_id = first_outlet.id
+        return []
 
     return (
         db.query(RestaurantMenuCategory)
@@ -96,15 +97,10 @@ def create_menu_category(
     db: Session = Depends(get_db),
     manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    outlet = None
-    if payload.outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == payload.outlet_id).first()
+    scoped_outlet_id = get_user_scoped_outlet_id(db, manager_user, payload.outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first() if scoped_outlet_id else None
     if not outlet:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
-    if not outlet:
-        raise HTTPException(status_code=404, detail="Restaurant outlet not found")
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found for this tenant")
 
     emoji = payload.icon_emoji or "🍽️"
     category = RestaurantMenuCategory(
@@ -168,11 +164,9 @@ def get_menu_items(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
+    outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
     if not outlet_id:
-        first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-        if not first_outlet:
-            return []
-        outlet_id = first_outlet.id
+        return []
 
     query = (
         db.query(RestaurantMenuItem)
@@ -200,13 +194,8 @@ def create_menu_item(
     db: Session = Depends(get_db),
     manager_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
-    outlet = None
-    if payload.outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == payload.outlet_id).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
+    scoped_outlet_id = get_user_scoped_outlet_id(db, manager_user, payload.outlet_id)
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first() if scoped_outlet_id else None
     if not outlet:
         raise HTTPException(status_code=404, detail="No active restaurant outlet found.")
 
