@@ -193,10 +193,18 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
         data={"sub": str(user.id)}, expires_delta=access_token_expires
     )
     
-    # Fetch assigned outlet or default to tenant/active outlet
+    # Fetch assigned outlet strictly scoped to user's tenant
     outlet = None
     if user.outlet_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id).first()
+        outlet_query = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id)
+        if user.tenant_id:
+            outlet_query = outlet_query.filter(RestaurantOutlet.tenant_id == user.tenant_id)
+        outlet = outlet_query.first()
+        # If the user had an outlet_id pointing to another tenant, disconnect it immediately
+        if not outlet and user.tenant_id:
+            user.outlet_id = None
+            db.commit()
+
     if not outlet:
         if user.tenant_id:
             outlet = db.query(RestaurantOutlet).filter(
@@ -214,7 +222,10 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
         user.tenant_id = outlet.tenant_id
         updated = True
     if outlet and user.outlet_id != outlet.id and outlet.tenant_id == user.tenant_id:
-        existing_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id).first() if user.outlet_id else None
+        existing_outlet = db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.id == user.outlet_id,
+            RestaurantOutlet.tenant_id == user.tenant_id
+        ).first() if user.outlet_id else None
         if not existing_outlet:
             user.outlet_id = outlet.id
             updated = True
