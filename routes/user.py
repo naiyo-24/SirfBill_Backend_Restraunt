@@ -31,7 +31,8 @@ def get_users(
     search: Optional[str] = None,
     role: Optional[str] = None,
     tenant_id: Optional[UUID] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """
     Fetch all users or filter by role (e.g. CASHIER, KITCHEN, MANAGER, USER) and search term.
@@ -41,12 +42,13 @@ def get_users(
     from models.restaurant_outlet import RestaurantOutlet
 
     query = db.query(User)
+
+    effective_tenant_id = tenant_id or (current_user.tenant_id if current_user else None)
+    if effective_tenant_id:
+        query = query.filter(User.tenant_id == effective_tenant_id)
     
     if role:
         query = query.filter(User.role.ilike(role))
-    
-    if tenant_id:
-        query = query.filter(User.tenant_id == tenant_id)
         
     if search:
         query = query.filter(

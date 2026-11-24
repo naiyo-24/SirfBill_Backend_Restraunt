@@ -243,6 +243,9 @@ async def get_shops(
     Admin Action: Get all shops/outlets for the current tenant with all 5 sections.
     """
     query = db.query(RestaurantOutlet)
+    if admin_user and admin_user.tenant_id:
+        query = query.filter(RestaurantOutlet.tenant_id == admin_user.tenant_id)
+        
     user_role = (admin_user.role or "").upper() if admin_user else ""
     is_multi_branch = all_branches or (user_role in ['ADMIN', 'OWNER', 'SUPER_ADMIN', 'SUPERADMIN', 'MANAGER', 'INVENTORY', 'STOCK'])
     if not is_multi_branch and admin_user and admin_user.outlet_id:

@@ -301,20 +301,21 @@ def resolve_tenant_id(user: Optional[User], db: Session, target_outlet_id: Optio
     """
     Resolves tenant_id from authenticated user or specified outlet.
     """
+    # 1. Authenticated user's tenant always takes precedence to prevent cross-tenant leaks
+    if user and user.tenant_id:
+        return user.tenant_id
+
     if target_outlet_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_outlet_id).first()
         if outlet and outlet.tenant_id:
             return outlet.tenant_id
-
-    if user and user.tenant_id:
-        return user.tenant_id
 
     if user and user.outlet_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id).first()
         if outlet and outlet.tenant_id:
             return outlet.tenant_id
 
-    # Fallback to first available active outlet
+    # Fallback to first available active outlet (only for unauthenticated kiosks)
     first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
     if first_outlet and first_outlet.tenant_id:
         return first_outlet.tenant_id

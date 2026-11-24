@@ -198,17 +198,22 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
     if user.outlet_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id).first()
     if not outlet:
-        outlet_query = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True)
         if user.tenant_id:
-            outlet_query = outlet_query.filter(RestaurantOutlet.tenant_id == user.tenant_id)
-        outlet = outlet_query.first() or db.query(RestaurantOutlet).first()
+            outlet = db.query(RestaurantOutlet).filter(
+                RestaurantOutlet.tenant_id == user.tenant_id,
+                RestaurantOutlet.is_active == True
+            ).first() or db.query(RestaurantOutlet).filter(
+                RestaurantOutlet.tenant_id == user.tenant_id
+            ).first()
+        else:
+            outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first() or db.query(RestaurantOutlet).first()
 
-    # Self-heal missing tenant_id or orphan outlet_id on user
+    # Self-heal missing tenant_id or orphan outlet_id on user (strictly within same tenant)
     updated = False
     if not user.tenant_id and outlet and outlet.tenant_id:
         user.tenant_id = outlet.tenant_id
         updated = True
-    if outlet and user.outlet_id != outlet.id:
+    if outlet and user.outlet_id != outlet.id and outlet.tenant_id == user.tenant_id:
         existing_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id).first() if user.outlet_id else None
         if not existing_outlet:
             user.outlet_id = outlet.id
