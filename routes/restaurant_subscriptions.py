@@ -965,6 +965,31 @@ def check_order_status(
         rzp_order = client.order.fetch(order_id)
         status_val = rzp_order.get("status")
 
+        if status_val != "paid":
+            # Check payments linked to this order or payment link with order_id in notes
+            try:
+                order_pmts = client.order.payments(order_id)
+                for p in order_pmts.get("items", []):
+                    if p.get("status") in ("captured", "authorized"):
+                        status_val = "paid"
+                        break
+            except Exception:
+                pass
+
+        if status_val != "paid":
+            # Check recent payments in Razorpay that match this order_id in notes
+            try:
+                recent_pmts = client.payment.all({"count": 25})
+                for p in recent_pmts.get("items", []):
+                    if p.get("status") in ("captured", "authorized"):
+                        p_notes = p.get("notes", {}) or {}
+                        if p_notes.get("order_id") == order_id or p.get("order_id") == order_id:
+                            status_val = "paid"
+                            successful_pmt = p
+                            break
+            except Exception:
+                pass
+
         if status_val == "paid":
             existing_pmt = db.query(SubscriptionPayment).filter(
                 SubscriptionPayment.gateway_order_id == order_id
@@ -975,12 +1000,15 @@ def check_order_status(
                 ).first()
                 return {"paid": True, "status": "PAID", "payment_id": existing_pmt.gateway_payment_id, "subscription": _enrich_subscription_response(sub) if sub else None}
 
-            payments = client.order.payments(order_id)
-            successful_pmt = None
-            for p in payments.get("items", []):
-                if p.get("status") == "captured":
-                    successful_pmt = p
-                    break
+            if not successful_pmt:
+                try:
+                    payments = client.order.payments(order_id)
+                    for p in payments.get("items", []):
+                        if p.get("status") in ("captured", "authorized"):
+                            successful_pmt = p
+                            break
+                except Exception:
+                    pass
 
             if successful_pmt:
                 notes = rzp_order.get("notes", {})
