@@ -13,7 +13,7 @@ class Shop(Base):
     tenant_id = Column(UUID(as_uuid=True), default=uuid.uuid4, nullable=True, index=True) # Organization ID
     
     name = Column(String, nullable=False)
-    code = Column(String, unique=True, index=True)
+    code = Column(String, index=True)
     address = Column(String, nullable=False)
     city = Column(String)
     contact_number = Column(String)

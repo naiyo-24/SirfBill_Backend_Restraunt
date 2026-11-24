@@ -39,9 +39,10 @@ def get_optional_current_user(
     db: Session = Depends(get_db)
 ) -> Optional[User]:
     """
-    Returns the User if a valid Bearer token is passed; otherwise returns None (or fallback active staff).
+    Returns the User if a valid Bearer token is passed; otherwise returns None.
+    Never falls back across tenants to prevent data leaks.
     """
-    if credentials:
+    if credentials and credentials.credentials:
         try:
             payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
             user_id: str = payload.get("sub")
@@ -52,9 +53,7 @@ def get_optional_current_user(
         except Exception:
             pass
 
-    # Fallback to first active admin/staff user in database for dev/kiosk POS terminals
-    fallback = db.query(User).filter(User.role.in_(["ADMIN", "OWNER", "CASHIER", "MANAGER"])).first()
-    return fallback
+    return None
 
 def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
     """
@@ -74,14 +73,16 @@ def get_optional_admin_user(current_user: Optional[User] = Depends(get_optional_
     return current_user
 
 # --- Restaurant Role Dependencies ---
-RESTAURANT_ROLES = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "WAITER", "KITCHEN"]
+RESTAURANT_ROLES = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "POS", "WAITER", "CAPTAIN", "KITCHEN", "CHEF", "INVENTORY", "CRM", "STAFF"]
 
 def require_restaurant_roles(allowed_roles: list[str]):
     """
-    Dependency factory to enforce restaurant-specific role access.
+    Dependency factory to enforce restaurant-specific role access (case-insensitive).
     """
+    allowed_upper = [r.upper() for r in allowed_roles]
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in allowed_roles and current_user.role not in ["ADMIN", "OWNER"]:
+        user_role = (current_user.role or "").upper()
+        if user_role not in allowed_upper and user_role not in ["ADMIN", "OWNER", "SUPER_ADMIN"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access forbidden. Required role in: {allowed_roles}"

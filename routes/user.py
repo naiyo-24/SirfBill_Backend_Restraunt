@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from uuid import UUID
 import os
 import aiofiles
@@ -98,7 +99,22 @@ def create_user(
 
     # 1. If email/username provided, check or update existing
     if user.email:
-        existing = db.query(User).filter(User.email == user.email).first()
+        clean_email = user.email.strip().lower()
+        existing = db.query(User).filter(func.lower(User.email) == clean_email).first()
+
+        # Deduplicate auto-generated module accounts: e.g. pos_tbk001@sirfbill.com matching tbk001_pos
+        if not existing and target_branch and clean_email.endswith("@sirfbill.com"):
+            outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_branch).first()
+            if outlet:
+                code_clean = (outlet.code or "").lower().replace("-", "").replace(" ", "")
+                prefix = clean_email.split("@")[0].split("_")[0] # e.g. pos, kitchen, inventory, crm, waiter
+                suffix_map = {"pos": "_pos", "kitchen": "_kds", "inventory": "_inv", "crm": "_crm", "waiter": "_waiter"}
+                target_username = f"{code_clean}{suffix_map.get(prefix, '_' + prefix)}"
+                existing = db.query(User).filter(
+                    User.outlet_id == target_branch,
+                    func.lower(User.email) == target_username
+                ).first()
+
         if existing:
             if user.password:
                 existing.password = user.password

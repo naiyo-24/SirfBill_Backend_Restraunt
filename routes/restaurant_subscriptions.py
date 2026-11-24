@@ -299,31 +299,28 @@ def resolve_plan_from_request(
 
 def resolve_tenant_id(user: Optional[User], db: Session, target_outlet_id: Optional[uuid.UUID] = None) -> uuid.UUID:
     """
-    Resolves tenant_id from authenticated user or specified outlet.
+    Resolves tenant_id from target outlet or authenticated user.
+    Strictly tenant-scoped to avoid cross-tenant leaks.
     """
-    # 1. Authenticated user's tenant always takes precedence to prevent cross-tenant leaks
-    if user and user.tenant_id:
-        return user.tenant_id
-
+    # 1. Target outlet ID takes precedence when passed explicitly
     if target_outlet_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_outlet_id).first()
         if outlet and outlet.tenant_id:
             return outlet.tenant_id
+
+    # 2. Authenticated user's tenant
+    if user and user.tenant_id:
+        return user.tenant_id
 
     if user and user.outlet_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id).first()
         if outlet and outlet.tenant_id:
             return outlet.tenant_id
 
-    # Fallback to first available active outlet (only for unauthenticated kiosks)
+    # Fallback to first available active outlet
     first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
     if first_outlet and first_outlet.tenant_id:
         return first_outlet.tenant_id
-
-    # Fallback to any outlet tenant_id or generate fresh
-    any_outlet = db.query(RestaurantOutlet).first()
-    if any_outlet and any_outlet.tenant_id:
-        return any_outlet.tenant_id
 
     return uuid.uuid4()
 
@@ -556,24 +553,47 @@ def get_subscription_status(
     ).order_by(TenantSubscription.expires_at.desc()).first()
 
     if not sub:
-        default_plan = get_or_create_default_plan(db)
-        base, _, total = calculate_plan_amounts(default_plan.price)
-        return SubscriptionStatusResponse(
-            has_subscription=False,
-            is_active=False,
-            status="NONE",
-            plan_name=default_plan.name,
-            price=base,
-            base_price=base,
-            gst_note="GST (18%) Excluded",
-            total_price=total,
-            billing_cycle=default_plan.billing_cycle,
-            expires_at=None,
-            days_remaining=0,
-            features=default_plan.features,
-            outlet_id=outlet_id,
-            tenant_id=tenant_id
-        )
+        if tenant_id:
+            default_plan = get_or_create_default_plan(db)
+            valid_outlet_id = resolve_valid_outlet_id(db, outlet_id, tenant_id)
+            sub = TenantSubscription(
+                tenant_id=tenant_id,
+                outlet_id=valid_outlet_id,
+                plan_id=default_plan.id,
+                status="ACTIVE",
+                price_paid=Decimal("0.00"),
+                currency="INR",
+                started_at=now,
+                expires_at=now + timedelta(days=365),
+                payment_method="FREE_TRIAL",
+                payment_reference="AUTO_PROVISIONED",
+                invoice_number=f"SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}",
+                notes="Auto-provisioned complimentary subscription for restaurant outlet",
+                auto_renew=True,
+                purchased_by_id=current_user.id if current_user else None
+            )
+            db.add(sub)
+            db.commit()
+            db.refresh(sub)
+        else:
+            default_plan = get_or_create_default_plan(db)
+            base, _, total = calculate_plan_amounts(default_plan.price)
+            return SubscriptionStatusResponse(
+                has_subscription=False,
+                is_active=False,
+                status="NONE",
+                plan_name=default_plan.name,
+                price=base,
+                base_price=base,
+                gst_note="GST (18%) Excluded",
+                total_price=total,
+                billing_cycle=default_plan.billing_cycle,
+                expires_at=None,
+                days_remaining=0,
+                features=default_plan.features,
+                outlet_id=outlet_id,
+                tenant_id=tenant_id
+            )
 
     is_active = (sub.expires_at > now) and (sub.status != "CANCELLED")
     days_left = max(0, (sub.expires_at - now).days) if is_active else 0

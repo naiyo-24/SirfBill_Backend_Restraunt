@@ -199,19 +199,63 @@ async def create_shop(
                 existing_u.tenant_id = tenant_id
 
     # 2. Also persist in Shop table for backward compatibility
-    new_shop = Shop(
-        id=new_outlet.id,
-        tenant_id=tenant_id,
-        name=request.name,
-        code=request.code,
-        address=address_val or request.address,
-        city=city_val or request.city,
-        contact_number=phone_val or request.contact_number,
-        account_holder_name=extra.get("bank_account_name") or extra.get("ac_holder_name") or extra.get("account_holder_name") or request.account_holder_name,
-        status=request.status or "Active",
-        is_primary=request.is_primary or False
-    )
-    db.add(new_shop)
+    existing_shop = db.query(Shop).filter(Shop.id == new_outlet.id).first()
+    if not existing_shop:
+        new_shop = Shop(
+            id=new_outlet.id,
+            tenant_id=tenant_id,
+            name=request.name,
+            code=request.code,
+            address=address_val or request.address,
+            city=city_val or request.city,
+            contact_number=phone_val or request.contact_number,
+            account_holder_name=extra.get("bank_account_name") or extra.get("ac_holder_name") or extra.get("account_holder_name") or request.account_holder_name,
+            status=request.status or "Active",
+            is_primary=request.is_primary or False
+        )
+        db.add(new_shop)
+    else:
+        existing_shop.name = request.name
+        existing_shop.code = request.code
+        existing_shop.address = address_val or request.address
+        existing_shop.city = city_val or request.city
+        existing_shop.contact_number = phone_val or request.contact_number
+        existing_shop.status = request.status or "Active"
+        existing_shop.is_primary = request.is_primary or False
+        if tenant_id:
+            existing_shop.tenant_id = tenant_id
+
+    # 3. Auto-provision 1-year active subscription for new tenant so POS and other modules work immediately
+    if tenant_id:
+        from models.restaurant_subscription import TenantSubscription
+        from routes.restaurant_subscriptions import get_or_create_default_plan
+        from utils.timezone import get_current_time
+        from datetime import timedelta
+        from decimal import Decimal
+        import uuid as py_uuid
+
+        existing_sub = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id).first()
+        if not existing_sub:
+            default_plan = get_or_create_default_plan(db)
+            now_time = get_current_time()
+            new_sub = TenantSubscription(
+                tenant_id=tenant_id,
+                outlet_id=new_outlet.id,
+                plan_id=default_plan.id,
+                status="ACTIVE",
+                price_paid=Decimal("0.00"),
+                currency="INR",
+                started_at=now_time,
+                expires_at=now_time + timedelta(days=365),
+                payment_method="FREE_TRIAL",
+                payment_reference="ONBOARDING_PROVISION",
+                invoice_number=f"SUB-{now_time.strftime('%Y%m%d')}-{py_uuid.uuid4().hex[:6].upper()}",
+                notes="Automatic complimentary 1-year subscription on outlet creation",
+                auto_renew=True,
+                purchased_by_id=admin_user.id if admin_user else None
+            )
+            db.add(new_sub)
+
     db.commit()
     db.refresh(new_outlet)
 

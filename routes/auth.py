@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
 from uuid import UUID
 
 from models.database import get_db
@@ -173,13 +174,19 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
     Admin / Staff Login using Email and Password.
     Returns access token, user role, and assigned restaurant outlet info.
     """
-    user = db.query(User).filter(User.email == request.email).first()
+    clean_email = (request.email or "").strip().lower()
+    user = db.query(User).filter(
+        or_(
+            func.lower(User.email) == clean_email,
+            User.phone == request.email.strip()
+        )
+    ).first()
     
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
         
     role_upper = (user.role or "").upper()
-    allowed_roles = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "KITCHEN", "WAITER", "CHEF", "SUPER_ADMIN", "STAFF"]
+    allowed_roles = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "POS", "KITCHEN", "WAITER", "CHEF", "CAPTAIN", "INVENTORY", "CRM", "SUPER_ADMIN", "STAFF"]
     if role_upper not in allowed_roles:
         raise HTTPException(status_code=403, detail="You do not have access privileges")
         
@@ -235,9 +242,14 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
 
     resolved_outlet_id = str(outlet.id) if outlet else (str(user.outlet_id) if user.outlet_id else None)
 
+    # Terminal visibility for login events
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    print(f"\n🔑 [USER LOGIN] Time: {now_str} | User: {user.email} | Role: {user.role} | Outlet: {outlet.name if outlet else 'None'} ({resolved_outlet_id})", flush=True)
+
     return {
         "message": "Admin Login successful",
         "access_token": access_token,
+        "token": access_token,
         "token_type": "bearer",
         "user_id": str(user.id),
         "role": user.role,
@@ -246,8 +258,11 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
         "tenant_id": str(user.tenant_id) if user.tenant_id else None,
         "outlet_id": resolved_outlet_id,
         "assigned_outlet_id": resolved_outlet_id,
+        "shop_id": resolved_outlet_id,
+        "branch_id": resolved_outlet_id,
         "outlet": {
             "id": str(outlet.id) if outlet else None,
+            "shop_id": str(outlet.id) if outlet else None,
             "name": outlet.name if outlet else "SirfBill Grand Restaurant",
             "code": outlet.code if outlet else "SB-01"
         } if outlet else None
