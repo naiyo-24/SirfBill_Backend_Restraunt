@@ -47,9 +47,10 @@ from schemas.restaurant_subscription import (
     TenantSubscriptionResponse,
     SubscriptionStatusResponse,
     SubscriptionPaymentResponse,
-    SubscriptionInvoiceResponse
+    SubscriptionInvoiceResponse,
+    BranchSubscriptionResponse
 )
-from dependencies import get_current_user, get_optional_current_user, get_admin_user
+from dependencies import get_current_user, get_optional_current_user, get_admin_user, get_user_scoped_outlet_id
 from utils.timezone import get_current_time
 
 router = APIRouter(
@@ -325,24 +326,35 @@ def resolve_tenant_id(user: Optional[User], db: Session, target_outlet_id: Optio
     return uuid.uuid4()
 
 
-def resolve_valid_outlet_id(db: Session, target_outlet_id: Optional[uuid.UUID], tenant_id: Optional[uuid.UUID] = None) -> Optional[uuid.UUID]:
+def resolve_valid_outlet_id(db: Session, target_outlet_id: Optional[uuid.UUID], tenant_id: Optional[uuid.UUID] = None, user: Optional[User] = None) -> Optional[uuid.UUID]:
     """
-    Validates that target_outlet_id exists in restaurant_outlets.
-    If not, falls back to a valid active outlet for the tenant, or None.
-    Guarantees no ForeignKeyViolation on tenant_subscriptions.outlet_id.
+    Validates that target_outlet_id exists in restaurant_outlets and belongs to tenant_id.
+    Guarantees strict branch scoping and no ForeignKeyViolation.
     """
+    scoped = get_user_scoped_outlet_id(db, user, target_outlet_id)
+    if scoped:
+        return scoped
+    if target_outlet_id and tenant_id:
+        outlet = db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.id == target_outlet_id,
+            RestaurantOutlet.tenant_id == tenant_id
+        ).first()
+        if outlet:
+            return outlet.id
     if target_outlet_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_outlet_id).first()
         if outlet:
             return outlet.id
     if tenant_id:
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == tenant_id, RestaurantOutlet.is_active == True).first()
-        if not outlet:
-            outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == tenant_id).first()
+        outlet = db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.tenant_id == tenant_id,
+            RestaurantOutlet.is_active == True
+        ).first() or db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.tenant_id == tenant_id
+        ).first()
         if outlet:
             return outlet.id
-    first = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    return first.id if first else None
+    return None
 
 
 def _enrich_subscription_response(sub: TenantSubscription) -> TenantSubscriptionResponse:
@@ -543,22 +555,29 @@ def get_subscription_status(
 ):
     """
     Lightweight health/entitlement check for UI banners, POS guards, and dashboards.
-    Reports whether the restaurant's subscription is currently active or expired.
+    Reports whether a specific branch's subscription is currently active or expired.
+    Strictly isolated per branch/outlet.
     """
-    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
     now = get_current_time()
 
-    sub = db.query(TenantSubscription).filter(
-        TenantSubscription.tenant_id == tenant_id
-    ).order_by(TenantSubscription.expires_at.desc()).first()
+    # Query subscription explicitly for this branch
+    query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+    if scoped_outlet_id:
+        sub = query.filter(TenantSubscription.outlet_id == scoped_outlet_id).order_by(TenantSubscription.expires_at.desc()).first()
+    else:
+        sub = query.order_by(TenantSubscription.expires_at.desc()).first()
 
     if not sub:
-        if tenant_id:
+        # Check if tenant has ANY subscription across any branch
+        total_tenant_subs = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id).count() if tenant_id else 0
+        if total_tenant_subs == 0 and tenant_id and scoped_outlet_id:
+            # First branch of a fresh tenant: auto-provision complimentary 1-year onboarding subscription
             default_plan = get_or_create_default_plan(db)
-            valid_outlet_id = resolve_valid_outlet_id(db, outlet_id, tenant_id)
             sub = TenantSubscription(
                 tenant_id=tenant_id,
-                outlet_id=valid_outlet_id,
+                outlet_id=scoped_outlet_id,
                 plan_id=default_plan.id,
                 status="ACTIVE",
                 price_paid=Decimal("0.00"),
@@ -568,7 +587,7 @@ def get_subscription_status(
                 payment_method="FREE_TRIAL",
                 payment_reference="AUTO_PROVISIONED",
                 invoice_number=f"SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}",
-                notes="Auto-provisioned complimentary subscription for restaurant outlet",
+                notes="Auto-provisioned complimentary subscription for primary restaurant outlet",
                 auto_renew=True,
                 purchased_by_id=current_user.id if current_user else None
             )
@@ -581,7 +600,7 @@ def get_subscription_status(
             return SubscriptionStatusResponse(
                 has_subscription=False,
                 is_active=False,
-                status="NONE",
+                status="UNPAID",
                 plan_name=default_plan.name,
                 price=base,
                 base_price=base,
@@ -591,13 +610,16 @@ def get_subscription_status(
                 expires_at=None,
                 days_remaining=0,
                 features=default_plan.features,
-                outlet_id=outlet_id,
+                outlet_id=scoped_outlet_id,
                 tenant_id=tenant_id
             )
 
-    is_active = (sub.expires_at > now) and (sub.status != "CANCELLED")
+    is_active = (sub.expires_at > now) and (sub.status not in ("CANCELLED", "PENDING_PAYMENT", "EXPIRED"))
     days_left = max(0, (sub.expires_at - now).days) if is_active else 0
-    computed_status = ("ACTIVE" if sub.status != "TRIAL" else "TRIAL") if is_active else "EXPIRED"
+    if not is_active:
+        computed_status = "PENDING_PAYMENT" if sub.status == "PENDING_PAYMENT" else "EXPIRED"
+    else:
+        computed_status = "ACTIVE" if sub.status != "TRIAL" else "TRIAL"
 
     inv_num = sub.invoice_number or f"INV-SUB-{sub.started_at.strftime('%Y%m%d')}-{str(sub.id)[:6].upper()}"
 
@@ -617,7 +639,7 @@ def get_subscription_status(
         expires_at=sub.expires_at,
         days_remaining=days_left,
         features=sub.plan.features if sub.plan and sub.plan.features else DEFAULT_FEATURES,
-        outlet_id=sub.outlet_id or outlet_id,
+        outlet_id=sub.outlet_id or scoped_outlet_id,
         tenant_id=tenant_id,
         latest_invoice_number=inv_num,
         latest_invoice_url=f"/api/subscriptions/invoices/{inv_num}/view",
@@ -632,38 +654,46 @@ def get_current_subscription(
     current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """
-    Get detailed subscription information for the current restaurant tenant.
+    Get detailed subscription information for a specific branch or primary branch.
     """
-    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
 
-    sub = db.query(TenantSubscription).filter(
-        TenantSubscription.tenant_id == tenant_id
-    ).order_by(TenantSubscription.expires_at.desc()).first()
+    query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+    if scoped_outlet_id:
+        sub = query.filter(TenantSubscription.outlet_id == scoped_outlet_id).order_by(TenantSubscription.expires_at.desc()).first()
+    else:
+        sub = query.order_by(TenantSubscription.expires_at.desc()).first()
 
     if not sub:
-        # Auto-create a 14-day complimentary trial so fresh restaurant setups work instantly
-        default_plan = get_or_create_default_plan(db)
-        now = get_current_time()
-        valid_outlet_id = resolve_valid_outlet_id(db, outlet_id, tenant_id)
-        sub = TenantSubscription(
-            tenant_id=tenant_id,
-            outlet_id=valid_outlet_id,
-            plan_id=default_plan.id,
-            status="TRIAL",
-            price_paid=Decimal("0.00"),
-            currency="INR",
-            started_at=now,
-            expires_at=now + timedelta(days=14),
-            payment_method="FREE_TRIAL",
-            payment_reference="COMPLIMENTARY_TRIAL",
-            invoice_number=f"TRIAL-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}",
-            notes="14-day complimentary trial on onboarding",
-            auto_renew=False,
-            purchased_by_id=current_user.id if current_user else None
-        )
-        db.add(sub)
-        db.commit()
-        db.refresh(sub)
+        total_tenant_subs = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id).count() if tenant_id else 0
+        if total_tenant_subs == 0 and tenant_id and scoped_outlet_id:
+            default_plan = get_or_create_default_plan(db)
+            now = get_current_time()
+            sub = TenantSubscription(
+                tenant_id=tenant_id,
+                outlet_id=scoped_outlet_id,
+                plan_id=default_plan.id,
+                status="TRIAL",
+                price_paid=Decimal("0.00"),
+                currency="INR",
+                started_at=now,
+                expires_at=now + timedelta(days=14),
+                payment_method="FREE_TRIAL",
+                payment_reference="COMPLIMENTARY_TRIAL",
+                invoice_number=f"TRIAL-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}",
+                notes="14-day complimentary trial on onboarding",
+                auto_renew=False,
+                purchased_by_id=current_user.id if current_user else None
+            )
+            db.add(sub)
+            db.commit()
+            db.refresh(sub)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No active subscription found for this branch. Please subscribe to activate."
+            )
 
     return _enrich_subscription_response(sub)
 
@@ -675,12 +705,21 @@ def subscribe_or_renew(
     current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """
-    Super Admin purchases or renews the subscription (₹299 / month).
-    1. Resolves plan (defaults to ₹299/mo SirfBill Restaurant Pro).
-    2. Extends active subscription by +30 days (stacking) or starts fresh 30-day period.
-    3. Generates formal invoice number and logs payment transaction.
+    Super Admin purchases or renews the subscription for a specific branch.
+    1. Resolves branch outlet_id (strictly scoped to user tenant).
+    2. Extends branch subscription by +30 days (stacking) or starts fresh.
+    3. Generates formal invoice number and logs payment transaction per branch.
     """
-    tenant_id = resolve_tenant_id(current_user, db, payload.outlet_id)
+    target_outlet_id = get_user_scoped_outlet_id(db, current_user, payload.outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, target_outlet_id)
+    if not target_outlet_id:
+        target_outlet_id = resolve_valid_outlet_id(db, payload.outlet_id, tenant_id, current_user)
+
+    outlet_name = "Restaurant Branch"
+    if target_outlet_id:
+        out_rec = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_outlet_id).first()
+        if out_rec:
+            outlet_name = out_rec.name
 
     # 1. Resolve Plan
     plan = resolve_plan_from_request(db, payload.plan_id, payload.plan_code, payload.duration_months)
@@ -689,28 +728,28 @@ def subscribe_or_renew(
     now = get_current_time()
     duration_days = plan.duration_days or 30
 
-    # 2. Check existing subscription to support seamless extension
-    existing_sub = db.query(TenantSubscription).filter(
-        TenantSubscription.tenant_id == tenant_id
-    ).order_by(TenantSubscription.expires_at.desc()).first()
+    # 2. Check existing subscription specifically for THIS branch to support seamless extension
+    existing_query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+    if target_outlet_id:
+        existing_query = existing_query.filter(TenantSubscription.outlet_id == target_outlet_id)
+    existing_sub = existing_query.order_by(TenantSubscription.expires_at.desc()).first()
 
     if existing_sub and existing_sub.expires_at > now and existing_sub.status in ("ACTIVE", "TRIAL"):
-        # Subscription is currently active -> extend from current expiry date
+        # Subscription is currently active for this branch -> extend from current expiry date
         new_start = existing_sub.started_at
         new_expiry = existing_sub.expires_at + timedelta(days=duration_days)
     else:
-        # Expired or new subscription -> starts today
+        # Expired, pending payment, or new subscription -> starts today
         new_start = now
         new_expiry = now + timedelta(days=duration_days)
 
     invoice_no = f"INV-SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
     payment_ref = payload.payment_reference or f"UPI-PAY-{uuid.uuid4().hex[:8].upper()}"
-    valid_outlet_id = resolve_valid_outlet_id(db, payload.outlet_id, tenant_id)
 
-    # 3. Create or update tenant subscription record
+    # 3. Create branch subscription record
     subscription = TenantSubscription(
         tenant_id=tenant_id,
-        outlet_id=valid_outlet_id,
+        outlet_id=target_outlet_id,
         plan_id=plan.id,
         status="ACTIVE",
         price_paid=total_price,
@@ -720,7 +759,7 @@ def subscribe_or_renew(
         payment_method=payload.payment_method or "UPI",
         payment_reference=payment_ref,
         invoice_number=invoice_no,
-        notes=payload.notes or f"Subscribed to {plan.name} (Base ₹{base_price} + 18% GST = ₹{total_price})",
+        notes=payload.notes or f"Subscribed {outlet_name} to {plan.name} (Base ₹{base_price} + 18% GST = ₹{total_price})",
         auto_renew=True,
         purchased_by_id=current_user.id if current_user else None
     )
@@ -738,7 +777,7 @@ def subscribe_or_renew(
         gateway_payment_id=payment_ref,
         status="SUCCESS",
         payment_date=now,
-        notes=f"Payment for {plan.name} by Super Admin"
+        notes=f"Payment for {plan.name} ({outlet_name}) by Super Admin"
     )
     db.add(payment)
 
@@ -773,11 +812,14 @@ def create_razorpay_order(
     current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """
-    Creates a Razorpay Order for purchasing or renewing the restaurant subscription.
+    Creates a Razorpay Order for purchasing or renewing the restaurant subscription for a specific branch.
     Returns the order ID and key ID for the frontend Razorpay Checkout modal.
     Charges the Gross Total (Base Price + 18% GST).
     """
-    tenant_id = resolve_tenant_id(current_user, db, payload.outlet_id)
+    target_outlet_id = get_user_scoped_outlet_id(db, current_user, payload.outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, target_outlet_id)
+    if not target_outlet_id:
+        target_outlet_id = resolve_valid_outlet_id(db, payload.outlet_id, tenant_id, current_user)
 
     plan = resolve_plan_from_request(db, payload.plan_id, payload.plan_code, payload.duration_months)
     base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
@@ -797,6 +839,7 @@ def create_razorpay_order(
                 "receipt": receipt_no,
                 "notes": {
                     "tenant_id": str(tenant_id),
+                    "outlet_id": str(target_outlet_id) if target_outlet_id else "",
                     "plan_id": str(plan.id),
                     "plan_code": plan.plan_code,
                     "base_price": str(base_price),
@@ -815,6 +858,7 @@ def create_razorpay_order(
                     "description": f"{plan.name} ({plan.billing_cycle})",
                     "notes": {
                         "tenant_id": str(tenant_id),
+                        "outlet_id": str(target_outlet_id) if target_outlet_id else "",
                         "plan_id": str(plan.id),
                         "plan_code": plan.plan_code,
                         "order_id": str(order_id)
@@ -847,7 +891,7 @@ def create_razorpay_order(
         plan_code=plan.plan_code,
         duration_days=plan.duration_days,
         billing_cycle=plan.billing_cycle,
-        outlet_id=payload.outlet_id,
+        outlet_id=target_outlet_id,
         payment_link_url=payment_link_url
     )
 
@@ -859,9 +903,12 @@ def verify_razorpay_payment(
     current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """
-    Verifies Razorpay payment signature and activates the subscription (+30 days, +90 days, +180 days, +365 days).
+    Verifies Razorpay payment signature and activates the subscription specifically for the target branch (+30 days, +90 days, +180 days, +365 days).
     """
-    tenant_id = resolve_tenant_id(current_user, db, payload.outlet_id)
+    target_outlet_id = get_user_scoped_outlet_id(db, current_user, payload.outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, target_outlet_id)
+    if not target_outlet_id:
+        target_outlet_id = resolve_valid_outlet_id(db, payload.outlet_id, tenant_id, current_user)
 
     plan = resolve_plan_from_request(db, payload.plan_id, payload.plan_code, payload.duration_months)
     base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
@@ -898,13 +945,14 @@ def verify_razorpay_payment(
             detail="Invalid Razorpay payment signature. Verification failed."
         )
 
-    # 2. Activate or extend subscription (+30 days)
+    # 2. Activate or extend subscription specifically for this branch
     now = get_current_time()
     duration_days = plan.duration_days or 30
 
-    existing_sub = db.query(TenantSubscription).filter(
-        TenantSubscription.tenant_id == tenant_id
-    ).order_by(TenantSubscription.expires_at.desc()).first()
+    existing_query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+    if target_outlet_id:
+        existing_query = existing_query.filter(TenantSubscription.outlet_id == target_outlet_id)
+    existing_sub = existing_query.order_by(TenantSubscription.expires_at.desc()).first()
 
     if existing_sub and existing_sub.expires_at > now and existing_sub.status in ("ACTIVE", "TRIAL"):
         new_start = existing_sub.started_at
@@ -914,11 +962,10 @@ def verify_razorpay_payment(
         new_expiry = now + timedelta(days=duration_days)
 
     invoice_no = f"INV-SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-    valid_outlet_id = resolve_valid_outlet_id(db, payload.outlet_id, tenant_id)
 
     subscription = TenantSubscription(
         tenant_id=tenant_id,
-        outlet_id=valid_outlet_id,
+        outlet_id=target_outlet_id,
         plan_id=plan.id,
         status="ACTIVE",
         price_paid=total_price,
@@ -1101,6 +1148,94 @@ def check_order_status(
         return {"paid": False, "error": str(e)}
 
 
+@router.get("/branches", response_model=List[BranchSubscriptionResponse])
+def get_branch_subscriptions(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+):
+    """
+    Returns the individual subscription status and renewal info for ALL branches of the current tenant.
+    Allows multi-branch owners to see which branches are Active, Expiring, or Unpaid, and renew them individually.
+    """
+    tenant_id = resolve_tenant_id(current_user, db)
+    now = get_current_time()
+
+    outlets = db.query(RestaurantOutlet).filter(
+        RestaurantOutlet.tenant_id == tenant_id
+    ).order_by(RestaurantOutlet.created_at.asc()).all()
+
+    default_plan = get_or_create_default_plan(db)
+    base_def, _, total_def = calculate_plan_amounts(default_plan.price)
+
+    results = []
+    for idx, out in enumerate(outlets):
+        svc = out.service_settings or {}
+        is_primary = svc.get("is_primary", (idx == 0))
+
+        sub = db.query(TenantSubscription).filter(
+            TenantSubscription.tenant_id == tenant_id,
+            TenantSubscription.outlet_id == out.id
+        ).order_by(TenantSubscription.expires_at.desc()).first()
+
+        if sub:
+            is_active = (sub.expires_at > now) and (sub.status not in ("CANCELLED", "PENDING_PAYMENT", "EXPIRED"))
+            days_left = max(0, (sub.expires_at - now).days) if is_active else 0
+            if not is_active:
+                status_str = "PENDING_PAYMENT" if sub.status == "PENDING_PAYMENT" else "EXPIRED"
+            else:
+                status_str = "ACTIVE" if sub.status != "TRIAL" else "TRIAL"
+
+            inv_num = sub.invoice_number or f"INV-SUB-{sub.started_at.strftime('%Y%m%d')}-{str(sub.id)[:6].upper()}"
+            sub_plan = sub.plan or default_plan
+            base_p, _, tot_p = calculate_plan_amounts(sub_plan.price)
+
+            results.append(BranchSubscriptionResponse(
+                outlet_id=out.id,
+                outlet_name=out.name,
+                outlet_code=out.code,
+                city=out.city,
+                is_primary=is_primary,
+                has_subscription=True,
+                is_active=is_active,
+                status=status_str,
+                plan_name=sub_plan.name,
+                plan_code=sub_plan.plan_code,
+                price=base_p,
+                total_price=tot_p,
+                billing_cycle=sub_plan.billing_cycle,
+                started_at=sub.started_at,
+                expires_at=sub.expires_at,
+                days_remaining=days_left,
+                latest_invoice_number=inv_num,
+                latest_invoice_url=f"/api/subscriptions/invoices/{inv_num}/view",
+                latest_download_url=f"/api/subscriptions/invoices/{inv_num}/pdf"
+            ))
+        else:
+            results.append(BranchSubscriptionResponse(
+                outlet_id=out.id,
+                outlet_name=out.name,
+                outlet_code=out.code,
+                city=out.city,
+                is_primary=is_primary,
+                has_subscription=False,
+                is_active=False,
+                status="UNPAID",
+                plan_name=default_plan.name,
+                plan_code=default_plan.plan_code,
+                price=base_def,
+                total_price=total_def,
+                billing_cycle=default_plan.billing_cycle,
+                started_at=None,
+                expires_at=None,
+                days_remaining=0,
+                latest_invoice_number=None,
+                latest_invoice_url=None,
+                latest_download_url=None
+            ))
+
+    return results
+
+
 @router.get("/history", response_model=List[TenantSubscriptionResponse])
 def get_subscription_history(
     outlet_id: Optional[uuid.UUID] = Query(None),
@@ -1108,14 +1243,16 @@ def get_subscription_history(
     current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """
-    Get full subscription history and invoices for the restaurant tenant.
+    Get full subscription history and invoices for the restaurant tenant, optionally filtered by branch.
     """
-    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
 
-    subscriptions = db.query(TenantSubscription).filter(
-        TenantSubscription.tenant_id == tenant_id
-    ).order_by(TenantSubscription.created_at.desc()).all()
+    query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+    if scoped_outlet_id:
+        query = query.filter(TenantSubscription.outlet_id == scoped_outlet_id)
 
+    subscriptions = query.order_by(TenantSubscription.created_at.desc()).all()
     return [_enrich_subscription_response(sub) for sub in subscriptions]
 
 
@@ -1127,15 +1264,17 @@ def grant_trial_extension(
     admin_user: User = Depends(get_admin_user)
 ):
     """
-    Admin override: Grant complimentary trial or extend validity by N days.
+    Admin override: Grant complimentary trial or extend validity by N days for a specific branch.
     """
-    tenant_id = resolve_tenant_id(admin_user, db, outlet_id)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, admin_user, outlet_id)
+    tenant_id = resolve_tenant_id(admin_user, db, scoped_outlet_id)
     plan = get_or_create_default_plan(db)
     now = get_current_time()
 
-    existing = db.query(TenantSubscription).filter(
-        TenantSubscription.tenant_id == tenant_id
-    ).order_by(TenantSubscription.expires_at.desc()).first()
+    existing_q = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+    if scoped_outlet_id:
+        existing_q = existing_q.filter(TenantSubscription.outlet_id == scoped_outlet_id)
+    existing = existing_q.order_by(TenantSubscription.expires_at.desc()).first()
 
     if existing and existing.expires_at > now:
         new_expiry = existing.expires_at + timedelta(days=days)
@@ -1143,7 +1282,7 @@ def grant_trial_extension(
         new_expiry = now + timedelta(days=days)
 
     invoice_no = f"TRIAL-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-    valid_outlet_id = resolve_valid_outlet_id(db, outlet_id, tenant_id)
+    valid_outlet_id = scoped_outlet_id or resolve_valid_outlet_id(db, outlet_id, tenant_id, admin_user)
 
     sub = TenantSubscription(
         tenant_id=tenant_id,
@@ -1183,10 +1322,8 @@ def render_subscription_invoice_html(sub: TenantSubscription, db: Session, autop
     outlet = None
     if sub.outlet_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == sub.outlet_id).first()
-    if not outlet:
+    if not outlet and sub.tenant_id:
         outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == sub.tenant_id).first()
-    if not outlet:
-        outlet = db.query(RestaurantOutlet).first()
 
     # 3. Resolve User
     user = None
@@ -1351,10 +1488,12 @@ def list_subscription_invoices(
     """
     List all stored tax invoices and subscription receipts from the database.
     Includes itemized breakdown (Subtotal, 9% CGST, 9% SGST, Total), payment reference, and view/download links.
+    Optionally filtered by branch outlet_id.
     """
-    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
 
-    subscriptions = (
+    query = (
         db.query(TenantSubscription)
         .options(
             joinedload(TenantSubscription.plan),
@@ -1362,22 +1501,11 @@ def list_subscription_invoices(
             joinedload(TenantSubscription.payments)
         )
         .filter(TenantSubscription.tenant_id == tenant_id)
-        .order_by(TenantSubscription.started_at.desc())
-        .all()
     )
+    if scoped_outlet_id:
+        query = query.filter(TenantSubscription.outlet_id == scoped_outlet_id)
 
-    if not subscriptions:
-        # Fallback to all subscriptions if tenant has not been scoped yet
-        subscriptions = (
-            db.query(TenantSubscription)
-            .options(
-                joinedload(TenantSubscription.plan),
-                joinedload(TenantSubscription.outlet),
-                joinedload(TenantSubscription.payments)
-            )
-            .order_by(TenantSubscription.started_at.desc())
-            .all()
-        )
+    subscriptions = query.order_by(TenantSubscription.started_at.desc()).all()
 
     invoices = []
     for s in subscriptions:
@@ -1441,21 +1569,19 @@ def get_latest_subscription_invoice(
     current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """
-    Returns the most recent subscription invoice for the active tenant.
+    Returns the most recent subscription invoice for the active branch/tenant.
     If redirect=true, directly opens the HTML bill view in the browser.
     """
-    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
-    sub = (
-        db.query(TenantSubscription)
-        .filter(TenantSubscription.tenant_id == tenant_id)
-        .order_by(TenantSubscription.expires_at.desc())
-        .first()
-    )
-    if not sub:
-        sub = db.query(TenantSubscription).order_by(TenantSubscription.created_at.desc()).first()
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
+
+    query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+    if scoped_outlet_id:
+        query = query.filter(TenantSubscription.outlet_id == scoped_outlet_id)
+    sub = query.order_by(TenantSubscription.expires_at.desc()).first()
 
     if not sub:
-        raise HTTPException(status_code=404, detail="No subscription invoices found in database")
+        raise HTTPException(status_code=404, detail="No subscription invoices found for this branch")
 
     inv_num = sub.invoice_number or f"INV-SUB-{sub.started_at.strftime('%Y%m%d')}-{str(sub.id)[:6].upper()}"
     view_url = f"/api/subscriptions/invoices/{inv_num}/view"
@@ -1496,9 +1622,6 @@ def view_subscription_invoice_html(
             pass
 
     if not sub:
-        sub = db.query(TenantSubscription).order_by(TenantSubscription.created_at.desc()).first()
-
-    if not sub:
         raise HTTPException(status_code=404, detail=f"Subscription invoice '{invoice_identifier}' not found in database")
 
     html_content = render_subscription_invoice_html(sub, db, autoprint=autoprint)
@@ -1524,9 +1647,6 @@ def download_subscription_invoice_pdf(
             sub = db.query(TenantSubscription).filter(TenantSubscription.id == val_uuid).first()
         except (ValueError, AttributeError):
             pass
-
-    if not sub:
-        sub = db.query(TenantSubscription).order_by(TenantSubscription.created_at.desc()).first()
 
     if not sub:
         raise HTTPException(status_code=404, detail=f"Subscription invoice '{invoice_identifier}' not found in database")

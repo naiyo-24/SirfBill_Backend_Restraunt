@@ -225,7 +225,7 @@ async def create_shop(
         if tenant_id:
             existing_shop.tenant_id = tenant_id
 
-    # 3. Auto-provision 1-year active subscription for new tenant so POS and other modules work immediately
+    # 3. Branch Subscription Provisioning
     if tenant_id:
         from models.restaurant_subscription import TenantSubscription
         from routes.restaurant_subscriptions import get_or_create_default_plan
@@ -234,8 +234,12 @@ async def create_shop(
         from decimal import Decimal
         import uuid as py_uuid
 
-        existing_sub = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id).first()
-        if not existing_sub:
+        existing_branches_count = db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.tenant_id == tenant_id
+        ).count()
+
+        if existing_branches_count <= 1:
+            # First primary branch: provide complimentary 1-year onboarding subscription
             default_plan = get_or_create_default_plan(db)
             now_time = get_current_time()
             new_sub = TenantSubscription(
@@ -250,7 +254,28 @@ async def create_shop(
                 payment_method="FREE_TRIAL",
                 payment_reference="ONBOARDING_PROVISION",
                 invoice_number=f"SUB-{now_time.strftime('%Y%m%d')}-{py_uuid.uuid4().hex[:6].upper()}",
-                notes="Automatic complimentary 1-year subscription on outlet creation",
+                notes="Automatic complimentary 1-year subscription on primary outlet creation",
+                auto_renew=True,
+                purchased_by_id=admin_user.id if admin_user else None
+            )
+            db.add(new_sub)
+        else:
+            # Additional / Multi-branch outlet: requires individual payment/renewal to activate
+            default_plan = get_or_create_default_plan(db)
+            now_time = get_current_time()
+            new_sub = TenantSubscription(
+                tenant_id=tenant_id,
+                outlet_id=new_outlet.id,
+                plan_id=default_plan.id,
+                status="PENDING_PAYMENT",
+                price_paid=Decimal("0.00"),
+                currency="INR",
+                started_at=now_time,
+                expires_at=now_time,
+                payment_method="UPI",
+                payment_reference="PENDING_BRANCH_ACTIVATION",
+                invoice_number=f"SUB-{now_time.strftime('%Y%m%d')}-{py_uuid.uuid4().hex[:6].upper()}",
+                notes=f"New branch '{new_outlet.name}' created. Requires subscription payment to activate.",
                 auto_renew=True,
                 purchased_by_id=admin_user.id if admin_user else None
             )
@@ -339,6 +364,41 @@ async def get_shops(
                 extra["module_accounts"] = mod_accounts
             elif "module_accounts" in svc:
                 extra["module_accounts"] = svc["module_accounts"]
+
+            # Enrich with per-branch subscription status
+            from models.restaurant_subscription import TenantSubscription
+            from utils.timezone import get_current_time
+            now_t = get_current_time()
+            branch_sub = db.query(TenantSubscription).filter(
+                TenantSubscription.tenant_id == o.tenant_id,
+                TenantSubscription.outlet_id == o.id
+            ).order_by(TenantSubscription.expires_at.desc()).first()
+
+            if branch_sub:
+                is_sub_active = (branch_sub.expires_at > now_t) and (branch_sub.status not in ("CANCELLED", "PENDING_PAYMENT", "EXPIRED"))
+                days_left = max(0, (branch_sub.expires_at - now_t).days) if is_sub_active else 0
+                if not is_sub_active:
+                    sub_stat = "PENDING_PAYMENT" if branch_sub.status == "PENDING_PAYMENT" else "EXPIRED"
+                else:
+                    sub_stat = "ACTIVE" if branch_sub.status != "TRIAL" else "TRIAL"
+
+                extra["subscription"] = {
+                    "status": sub_stat,
+                    "is_active": is_sub_active,
+                    "days_remaining": days_left,
+                    "plan_name": branch_sub.plan.name if branch_sub.plan else "SirfBill Restaurant Pro",
+                    "expires_at": branch_sub.expires_at.isoformat() if branch_sub.expires_at else None,
+                    "invoice_number": branch_sub.invoice_number
+                }
+            else:
+                extra["subscription"] = {
+                    "status": "UNPAID",
+                    "is_active": False,
+                    "days_remaining": 0,
+                    "plan_name": "SirfBill Restaurant Pro",
+                    "expires_at": None,
+                    "invoice_number": None
+                }
 
             results.append(ShopResponse(
                 id=o.id,

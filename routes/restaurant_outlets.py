@@ -55,6 +55,60 @@ def create_outlet(
         is_active=payload.is_active
     )
     db.add(db_outlet)
+    db.flush()
+
+    # Provision branch-specific subscription record
+    if tenant_id:
+        from models.restaurant_subscription import TenantSubscription
+        from routes.restaurant_subscriptions import get_or_create_default_plan
+        from utils.timezone import get_current_time
+        from datetime import timedelta
+        from decimal import Decimal
+        import uuid as py_uuid
+
+        existing_branches_count = db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.tenant_id == tenant_id
+        ).count()
+
+        default_plan = get_or_create_default_plan(db)
+        now_time = get_current_time()
+
+        if existing_branches_count <= 1:
+            new_sub = TenantSubscription(
+                tenant_id=tenant_id,
+                outlet_id=db_outlet.id,
+                plan_id=default_plan.id,
+                status="ACTIVE",
+                price_paid=Decimal("0.00"),
+                currency="INR",
+                started_at=now_time,
+                expires_at=now_time + timedelta(days=365),
+                payment_method="FREE_TRIAL",
+                payment_reference="ONBOARDING_PROVISION",
+                invoice_number=f"SUB-{now_time.strftime('%Y%m%d')}-{py_uuid.uuid4().hex[:6].upper()}",
+                notes="Automatic complimentary 1-year subscription on primary outlet creation",
+                auto_renew=True,
+                purchased_by_id=manager_user.id if manager_user else None
+            )
+        else:
+            new_sub = TenantSubscription(
+                tenant_id=tenant_id,
+                outlet_id=db_outlet.id,
+                plan_id=default_plan.id,
+                status="PENDING_PAYMENT",
+                price_paid=Decimal("0.00"),
+                currency="INR",
+                started_at=now_time,
+                expires_at=now_time,
+                payment_method="UPI",
+                payment_reference="PENDING_BRANCH_ACTIVATION",
+                invoice_number=f"SUB-{now_time.strftime('%Y%m%d')}-{py_uuid.uuid4().hex[:6].upper()}",
+                notes=f"New branch '{db_outlet.name}' created. Requires subscription payment to activate.",
+                auto_renew=True,
+                purchased_by_id=manager_user.id if manager_user else None
+            )
+        db.add(new_sub)
+
     db.commit()
     db.refresh(db_outlet)
     return db_outlet

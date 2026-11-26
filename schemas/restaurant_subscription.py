@@ -235,3 +235,36 @@ class SubscriptionPaymentResponse(BaseModel):
         return float(v) if v is not None else None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class BranchSubscriptionResponse(BaseModel):
+    outlet_id: UUID
+    outlet_name: str
+    outlet_code: Optional[str] = None
+    city: Optional[str] = None
+    is_primary: bool = False
+    has_subscription: bool = False
+    is_active: bool = False
+    status: str = "UNPAID" # ACTIVE, TRIAL, EXPIRED, PENDING_PAYMENT, UNPAID
+    plan_name: Optional[str] = None
+    plan_code: Optional[str] = None
+    price: Optional[Decimal] = None
+    total_price: Optional[Decimal] = None
+    billing_cycle: Optional[str] = None
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    days_remaining: int = 0
+    latest_invoice_number: Optional[str] = None
+    latest_invoice_url: Optional[str] = None
+    latest_download_url: Optional[str] = None
+
+    @field_serializer("price", check_fields=False)
+    def serialize_price(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    @field_serializer("total_price", check_fields=False)
+    def serialize_total_price(self, v: Optional[Decimal]) -> Optional[float]:
+        return float(v) if v is not None else None
+
+    model_config = ConfigDict(from_attributes=True)
+
