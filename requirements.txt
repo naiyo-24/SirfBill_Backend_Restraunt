@@ -20,3 +20,4 @@ setuptools<70
 python-calamine
 jinja2
 weasyprint
+qrcode

@@ -9,7 +9,8 @@ from models.database import get_db
 from models.user import User
 from models.restaurant_outlet import RestaurantOutlet
 from models.restaurant_table import RestaurantTable
-from models.restaurant_menu import RestaurantMenuItem
+from models.restaurant_menu import RestaurantMenuItem, RestaurantMenuCategory
+from models.restaurant_modifier import RestaurantModifierGroup
 from models.restaurant_order import RestaurantOrder
 from models.restaurant_order_line import RestaurantOrderLine
 from models.restaurant_kitchen import RestaurantKitchenTicket, RestaurantKitchenTicketItem, RestaurantKitchenEvent
@@ -20,7 +21,8 @@ from models.restaurant_stock_ledger import RestaurantStockLedger
 from models.restaurant_tender import RestaurantTender
 from schemas.restaurant_order import (
     RestaurantOrderCreate, RestaurantOrderUpdateItems, RestaurantOrderStateTransition,
-    RestaurantOrderItemVoid, RestaurantOrderResponse, RestaurantOrderLineResponse
+    RestaurantOrderItemVoid, RestaurantOrderResponse, RestaurantOrderLineResponse,
+    CustomerTableOrderCreate, RejectQROrderRequest, CustomerTableInfoResponse
 )
 from schemas.restaurant_kitchen import KitchenTicketResponse
 from dependencies import (
@@ -305,6 +307,29 @@ def get_active_order_by_table(
         .first()
     )
     return order
+
+
+@router.get("/pending-qr", response_model=List[RestaurantOrderResponse])
+def get_pending_qr_orders(
+    outlet_id: Optional[UUID] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    POS Cashier Review Queue: Returns all unverified Dine-in QR orders submitted by customers,
+    awaiting confirmation before being fired to the kitchen.
+    """
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    if not scoped_outlet_id:
+        return []
+
+    return (
+        db.query(RestaurantOrder)
+        .filter(RestaurantOrder.outlet_id == scoped_outlet_id)
+        .filter(RestaurantOrder.status == "PENDING_CONFIRMATION")
+        .order_by(RestaurantOrder.created_at.desc())
+        .all()
+    )
 
 
 @router.get("/{order_id}", response_model=RestaurantOrderResponse)
@@ -1345,3 +1370,695 @@ def print_thermal_bill(
         "order_id": order_id,
         "bill_pdf_url": bill_pdf_url
     }
+
+
+# --- Table QR Order Confirmation, Rejection, and Customer Dining Flow ---
+
+
+@router.post("/{order_id}/confirm-qr", response_model=RestaurantOrderResponse)
+def confirm_qr_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    POS Cashier Action: Confirms a customer-scanned Table QR order,
+    locks table status to OCCUPIED, and automatically fires KOT tickets to the kitchen KDS.
+    """
+    parsed_uuid = None
+    try:
+        parsed_uuid = UUID(str(order_id))
+    except (ValueError, TypeError):
+        pass
+
+    order_query = db.query(RestaurantOrder)
+    if parsed_uuid:
+        order = order_query.filter(RestaurantOrder.id == parsed_uuid).with_for_update().first()
+    else:
+        order = order_query.filter(RestaurantOrder.order_number == str(order_id)).with_for_update().first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status not in ["PENDING_CONFIRMATION", "OPEN"]:
+        raise HTTPException(status_code=400, detail=f"Cannot confirm order in '{order.status}' status")
+
+    # Update Table status to OCCUPIED
+    if order.table_id:
+        table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
+        if table:
+            table.status = "OCCUPIED"
+
+    # Set status to OPEN before calling send_to_kitchen
+    order.status = "OPEN"
+    db.commit()
+
+    # Automatically fire KOT tickets to the kitchen
+    try:
+        send_to_kitchen(order_id=str(order.id), db=db, current_user=current_user)
+    except Exception as e:
+        print(f"Warning: send_to_kitchen inside confirm_qr_order completed with note: {e}")
+
+    db.refresh(order)
+    return order
+
+
+@router.post("/{order_id}/reject-qr", response_model=RestaurantOrderResponse)
+def reject_qr_order(
+    order_id: str,
+    payload: Optional[RejectQROrderRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    POS Cashier Action: Rejects an unverified customer QR order (e.g. 86 item out of stock, guest left table).
+    """
+    parsed_uuid = None
+    try:
+        parsed_uuid = UUID(str(order_id))
+    except (ValueError, TypeError):
+        pass
+
+    order_query = db.query(RestaurantOrder)
+    if parsed_uuid:
+        order = order_query.filter(RestaurantOrder.id == parsed_uuid).first()
+    else:
+        order = order_query.filter(RestaurantOrder.order_number == str(order_id)).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    reason = (payload.reason if payload else None) or "Rejected by cashier at POS terminal"
+    order.status = "CANCELLED"
+    order.notes = f"{order.notes or ''} [REJECTED: {reason}]".strip()
+
+    # Mark lines as CANCELLED
+    for line in order.lines:
+        line.kot_status = "CANCELLED"
+
+    # If table has no other active orders, reset table to VACANT
+    if order.table_id:
+        other_active = (
+            db.query(RestaurantOrder)
+            .filter(RestaurantOrder.table_id == order.table_id)
+            .filter(RestaurantOrder.id != order.id)
+            .filter(RestaurantOrder.status.in_(["OPEN", "SENT_TO_KITCHEN", "HOLD", "SERVED"]))
+            .first()
+        )
+        if not other_active:
+            table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
+            if table and table.status != "VACANT":
+                table.status = "VACANT"
+
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+# --- Public Customer Mobile QR Ordering Router ---
+customer_dining_router = APIRouter(
+    prefix="/api/restaurant/customer",
+    tags=["Restaurant - Customer Mobile Dine-In"]
+)
+
+@customer_dining_router.get("/table/{table_id}", response_model=CustomerTableInfoResponse)
+def get_customer_table_info(
+    table_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Public Landing Check: Called when a customer scans a table QR code.
+    Validates table, returns restaurant branding, and checks for active existing order.
+    """
+    table = db.query(RestaurantTable).filter(RestaurantTable.id == table_id, RestaurantTable.is_active == True).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Invalid or inactive table QR code.")
+
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == table.outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found.")
+
+    # Find active order if customer already has a meal in progress on this table
+    active_order = (
+        db.query(RestaurantOrder)
+        .filter(RestaurantOrder.table_id == table.id)
+        .filter(RestaurantOrder.status.in_(["PENDING_CONFIRMATION", "OPEN", "SENT_TO_KITCHEN", "HOLD", "SERVED"]))
+        .order_by(RestaurantOrder.created_at.desc())
+        .first()
+    )
+
+    tax_val = float(outlet.tax_rate) if outlet.tax_rate is not None else 5.0
+    return CustomerTableInfoResponse(
+        table_id=table.id,
+        table_code=table.table_code,
+        section=table.section,
+        outlet_id=outlet.id,
+        outlet_name=outlet.name,
+        outlet_address=outlet.address,
+        outlet_phone=outlet.phone,
+        currency=outlet.currency or "INR",
+        tax_rate=tax_val,
+        active_order_id=active_order.id if active_order else None,
+        active_order_number=active_order.order_number if active_order else None,
+        active_order_status=active_order.status if active_order else None
+    )
+
+
+@customer_dining_router.get("/menu")
+def get_customer_public_menu(
+    outlet_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Public Menu API: Fetches full digital menu (categories, dishes, variants, modifiers)
+    for customers scanning the table QR.
+    """
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == outlet_id, RestaurantOutlet.is_active == True).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found.")
+
+    categories = (
+        db.query(RestaurantMenuCategory)
+        .filter(RestaurantMenuCategory.outlet_id == outlet.id, RestaurantMenuCategory.is_active == True)
+        .order_by(RestaurantMenuCategory.display_order.asc(), RestaurantMenuCategory.name.asc())
+        .all()
+    )
+
+    items = (
+        db.query(RestaurantMenuItem)
+        .filter(RestaurantMenuItem.outlet_id == outlet.id, RestaurantMenuItem.is_active == True)
+        .order_by(RestaurantMenuItem.name.asc())
+        .all()
+    )
+
+    modifiers = (
+        db.query(RestaurantModifierGroup)
+        .filter(RestaurantModifierGroup.outlet_id == outlet.id)
+        .all()
+    )
+
+    # Group items by category
+    items_by_cat: dict[Any, list] = {}
+    for itm in items:
+        cat_key = itm.category_id or "uncategorized"
+        items_by_cat.setdefault(cat_key, []).append({
+            "id": str(itm.id),
+            "name": itm.name,
+            "description": itm.description,
+            "base_price": float(itm.base_price or 0.0),
+            "tax_rate": float(itm.tax_rate or 5.0),
+            "is_veg": itm.is_veg,
+            "spice_level": itm.spice_level,
+            "image_url": itm.image_url,
+            "badge": itm.badge,
+            "variants": itm.variants or [],
+            "modifier_group_ids": [str(g.id) for g in (itm.modifier_groups or [])]
+        })
+
+    cat_list = []
+    for c in categories:
+        cat_list.append({
+            "id": str(c.id),
+            "name": c.name,
+            "icon_emoji": c.icon_emoji,
+            "items": items_by_cat.get(c.id, [])
+        })
+
+    mod_list = []
+    for g in modifiers:
+        mod_list.append({
+            "id": str(g.id),
+            "name": g.name,
+            "min_selections": g.min_selections,
+            "max_selections": g.max_selections,
+            "options": [
+                {
+                    "id": str(opt.id),
+                    "name": opt.name,
+                    "price": float(opt.price or 0.0),
+                    "is_default": opt.is_default
+                } for opt in (g.options or [])
+            ]
+        })
+
+    return {
+        "outlet": {
+            "id": str(outlet.id),
+            "name": outlet.name,
+            "address": outlet.address,
+            "currency": outlet.currency or "INR",
+            "tax_rate": float(outlet.tax_rate or 5.0),
+            "logo_url": outlet.logo_url
+        },
+        "categories": cat_list,
+        "modifier_groups": mod_list
+    }
+
+
+@customer_dining_router.post("/orders", response_model=RestaurantOrderResponse, status_code=status.HTTP_201_CREATED)
+def customer_place_qr_order(
+    payload: CustomerTableOrderCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Public Customer Action: Submits a table order from a mobile browser.
+    Creates order in PENDING_CONFIRMATION status so POS can approve and send to kitchen.
+    """
+    # 1. Idempotency Check
+    if payload.idempotency_key:
+        existing_order = (
+            db.query(RestaurantOrder)
+            .filter(RestaurantOrder.idempotency_key == payload.idempotency_key)
+            .first()
+        )
+        if existing_order:
+            return existing_order
+
+    # 2. Validate Outlet & Table
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == payload.outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found.")
+
+    table = db.query(RestaurantTable).filter(
+        RestaurantTable.id == payload.table_id,
+        RestaurantTable.outlet_id == outlet.id,
+        RestaurantTable.is_active == True
+    ).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found or not active in this restaurant.")
+
+    # 3. Check Branch Subscription Status
+    from dependencies import check_active_subscription
+    if not check_active_subscription(outlet.tenant_id, db, outlet_id=outlet.id):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"Subscription for '{outlet.name}' is inactive. Mobile ordering is temporarily unavailable."
+        )
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Cart cannot be empty. Please select at least one item.")
+
+    # 4. Generate Order Number
+    order_num = _generate_order_number(db, outlet.id)
+
+    order = RestaurantOrder(
+        outlet_id=outlet.id,
+        tenant_id=outlet.tenant_id,
+        order_number=order_num,
+        order_type="DINE_IN",
+        status="PENDING_CONFIRMATION",
+        table_id=table.id,
+        customer_name=payload.customer_name or "Dine-in Guest",
+        customer_phone=payload.customer_phone,
+        notes=payload.notes,
+        payment_method="CASH",
+        idempotency_key=payload.idempotency_key,
+        subtotal=Decimal("0.00"),
+        tax_amount=Decimal("0.00"),
+        discount_amount=Decimal("0.00"),
+        rounding_adjustment=Decimal("0.00"),
+        grand_total=Decimal("0.00"),
+        paid_amount=Decimal("0.00"),
+        version=1
+    )
+    db.add(order)
+    db.flush()
+
+    subtotal_acc = Decimal("0.00")
+    tax_acc = Decimal("0.00")
+
+    # 5. Compute order lines with server-side pricing
+    for line_in in payload.items:
+        resolved_item_id = line_in.item_id or getattr(line_in, "menu_item_id", None)
+        if resolved_item_id:
+            try:
+                resolved_item_id = UUID(str(resolved_item_id))
+            except (ValueError, TypeError):
+                resolved_item_id = None
+
+        item = None
+        if resolved_item_id:
+            item = db.query(RestaurantMenuItem).filter(RestaurantMenuItem.id == resolved_item_id).first()
+        if not item and line_in.name:
+            item = db.query(RestaurantMenuItem).filter(
+                RestaurantMenuItem.outlet_id == outlet.id,
+                RestaurantMenuItem.name.ilike(line_in.name)
+            ).first()
+
+        qty = max(1, line_in.quantity)
+        if item:
+            unit_p, mod_p, tax_r, tax_a, line_tot, sel_mods = _calculate_line_item(
+                db, item.id, line_in.variant_name, qty, line_in.modifiers
+            )[1:]
+            item_name = item.name
+            prep_station = item.prep_station
+        else:
+            unit_p = line_in.unit_price or getattr(line_in, "price", Decimal("0.00")) or Decimal("0.00")
+            mod_p = Decimal("0.00")
+            tax_r = Decimal(str(outlet.tax_rate or 5.0))
+            tax_a = (unit_p * Decimal(str(qty)) * tax_r) / Decimal("100.00")
+            line_tot = (unit_p * Decimal(str(qty))) + tax_a
+            sel_mods = None
+            item_name = line_in.name or "Food Item"
+            prep_station = "KITCHEN"
+
+        instructions = line_in.special_instructions or getattr(line_in, "notes", None)
+
+        db_line = RestaurantOrderLine(
+            order_id=order.id,
+            item_id=item.id if item else None,
+            item_name=item_name,
+            variant_name=line_in.variant_name,
+            prep_station=prep_station,
+            quantity=qty,
+            unit_price=unit_p,
+            modifier_price=mod_p,
+            selected_modifiers=sel_mods,
+            tax_rate=tax_r,
+            tax_amount=tax_a,
+            line_total=line_tot,
+            special_instructions=instructions,
+            kot_status="PENDING_SEND"
+        )
+        db.add(db_line)
+        subtotal_acc += (unit_p + mod_p) * Decimal(str(qty))
+        tax_acc += tax_a
+
+    grand_total_raw = subtotal_acc + tax_acc
+    rounded_grand = grand_total_raw.quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
+    rounding_diff = rounded_grand - grand_total_raw
+
+    order.subtotal = subtotal_acc
+    order.tax_amount = tax_acc
+    order.rounding_adjustment = rounding_diff
+    order.grand_total = rounded_grand
+
+    # Reflect pending activity on table
+    if table.status == "VACANT":
+        table.status = "RESERVED"
+
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+@customer_dining_router.get("/orders/{order_id}", response_model=RestaurantOrderResponse)
+def get_customer_order_status(
+    order_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Public Order Tracking: Customer phone polls this endpoint to see real-time updates
+    (PENDING_CONFIRMATION -> OPEN -> SENT_TO_KITCHEN -> SERVED).
+    """
+    parsed_uuid = None
+    try:
+        parsed_uuid = UUID(str(order_id))
+    except (ValueError, TypeError):
+        pass
+
+    order_query = db.query(RestaurantOrder)
+    if parsed_uuid:
+        order = order_query.filter(RestaurantOrder.id == parsed_uuid).first()
+    else:
+        order = order_query.filter(RestaurantOrder.order_number == str(order_id)).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return order
+
+
+
+# =====================================================================
+# --- Public Customer QR Dine-In Ordering Router ---
+# =====================================================================
+
+customer_dining_router = APIRouter(
+    prefix="/api/restaurant/customer",
+    tags=["Restaurant - Customer QR Dine-In"]
+)
+
+@customer_dining_router.get("/table/{table_id}", response_model=CustomerTableInfoResponse)
+def get_customer_table_info(
+    table_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Customer Scan Landing: Returns table details, restaurant branding, and ongoing table order.
+    """
+    table = db.query(RestaurantTable).filter(
+        RestaurantTable.id == table_id,
+        RestaurantTable.is_active == True
+    ).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found or is currently inactive.")
+
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == table.outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found.")
+
+    active_order = (
+        db.query(RestaurantOrder)
+        .filter(RestaurantOrder.table_id == table.id)
+        .filter(RestaurantOrder.status.in_(["PENDING_CONFIRMATION", "OPEN", "SENT_TO_KITCHEN", "HOLD", "SERVED"]))
+        .order_by(RestaurantOrder.created_at.desc())
+        .first()
+    )
+
+    return CustomerTableInfoResponse(
+        table_id=table.id,
+        table_code=table.table_code,
+        section=table.section,
+        outlet_id=outlet.id,
+        outlet_name=outlet.name,
+        outlet_address=outlet.address,
+        outlet_phone=outlet.phone,
+        currency=outlet.currency or "INR",
+        tax_rate=float(outlet.tax_rate or 5.0),
+        active_order_id=active_order.id if active_order else None,
+        active_order_number=active_order.order_number if active_order else None,
+        active_order_status=active_order.status if active_order else None
+    )
+
+
+@customer_dining_router.get("/menu")
+def get_customer_menu(
+    outlet_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Public digital menu for customer phone scanner.
+    Returns categorized items, variant prices, badges, and modifiers.
+    """
+    categories = db.query(RestaurantMenuCategory).filter(
+        RestaurantMenuCategory.outlet_id == outlet_id,
+        RestaurantMenuCategory.is_active == True
+    ).order_by(RestaurantMenuCategory.sort_order.asc(), RestaurantMenuCategory.name.asc()).all()
+
+    items = db.query(RestaurantMenuItem).filter(
+        RestaurantMenuItem.outlet_id == outlet_id,
+        RestaurantMenuItem.is_active == True
+    ).order_by(RestaurantMenuItem.name.asc()).all()
+
+    cats_map = {}
+    for c in categories:
+        cats_map[str(c.id)] = {
+            "id": str(c.id),
+            "name": c.name,
+            "description": c.description,
+            "icon_emoji": c.icon_emoji,
+            "items": []
+        }
+
+    for item in items:
+        c_id = str(item.category_id) if item.category_id else "uncategorized"
+        if c_id not in cats_map:
+            cats_map[c_id] = {
+                "id": c_id,
+                "name": "General Menu",
+                "description": None,
+                "icon_emoji": "🍽️",
+                "items": []
+            }
+        cats_map[c_id]["items"].append({
+            "id": str(item.id),
+            "name": item.name,
+            "short_code": item.short_code,
+            "description": item.description,
+            "price": float(item.price or 0.0),
+            "variant_prices": item.variant_prices,
+            "badge": item.badge,
+            "item_type": item.item_type,
+            "is_veg": (item.item_type == "VEG"),
+            "image_url": item.image_url,
+            "prep_station": item.prep_station,
+            "is_available": item.is_available
+        })
+
+    return {
+        "outlet_id": str(outlet_id),
+        "categories": list(cats_map.values()),
+        "total_items": len(items)
+    }
+
+
+@customer_dining_router.post("/orders", response_model=RestaurantOrderResponse, status_code=status.HTTP_201_CREATED)
+def customer_place_order(
+    payload: CustomerTableOrderCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Customer Action: Places a dine-in order from mobile camera scan.
+    Enters as PENDING_CONFIRMATION awaiting cashier confirmation at the POS.
+    """
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == payload.outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Restaurant outlet not found.")
+
+    table = db.query(RestaurantTable).filter(
+        RestaurantTable.id == payload.table_id,
+        RestaurantTable.outlet_id == outlet.id,
+        RestaurantTable.is_active == True
+    ).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found or is currently inactive.")
+
+    # Check Branch Subscription Status
+    from dependencies import check_active_subscription
+    if not check_active_subscription(outlet.tenant_id, db, outlet_id=outlet.id):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Online/QR ordering is temporarily unavailable for this branch. Please contact restaurant staff."
+        )
+
+    # Idempotency check
+    if payload.idempotency_key:
+        existing = db.query(RestaurantOrder).filter(RestaurantOrder.idempotency_key == payload.idempotency_key).first()
+        if existing:
+            return existing
+
+    order_num = _generate_order_number(db, outlet.id)
+
+    order = RestaurantOrder(
+        outlet_id=outlet.id,
+        tenant_id=outlet.tenant_id,
+        order_number=order_num,
+        order_type="DINE_IN",
+        status="PENDING_CONFIRMATION",
+        table_id=table.id,
+        customer_name=payload.customer_name or "Dine-in Guest",
+        customer_phone=payload.customer_phone,
+        notes=payload.notes,
+        payment_method="CASH",
+        idempotency_key=payload.idempotency_key,
+        subtotal=Decimal("0.00"),
+        tax_amount=Decimal("0.00"),
+        discount_amount=Decimal("0.00"),
+        rounding_adjustment=Decimal("0.00"),
+        grand_total=Decimal("0.00"),
+        paid_amount=Decimal("0.00"),
+        version=1
+    )
+    db.add(order)
+    db.flush()
+
+    subtotal_acc = Decimal("0.00")
+    tax_acc = Decimal("0.00")
+
+    for line_in in payload.items:
+        resolved_item_id = line_in.item_id or line_in.menu_item_id
+        if resolved_item_id:
+            try:
+                resolved_item_id = UUID(str(resolved_item_id))
+            except (ValueError, TypeError):
+                resolved_item_id = None
+
+        item = None
+        if resolved_item_id:
+            item = db.query(RestaurantMenuItem).filter(RestaurantMenuItem.id == resolved_item_id).first()
+        if not item and line_in.name:
+            item = db.query(RestaurantMenuItem).filter(
+                RestaurantMenuItem.outlet_id == outlet.id,
+                RestaurantMenuItem.name.ilike(line_in.name)
+            ).first()
+
+        qty = max(1, line_in.quantity)
+        if item:
+            unit_p, mod_p, tax_r, tax_a, line_tot, sel_mods = _calculate_line_item(
+                db, item.id, line_in.variant_name, qty, line_in.modifiers
+            )[1:]
+            item_name = item.name
+            prep_station = item.prep_station
+        else:
+            unit_p = line_in.unit_price or line_in.price or Decimal("0.00")
+            mod_p = Decimal("0.00")
+            tax_r = Decimal(str(outlet.tax_rate or 5.0))
+            tax_a = (unit_p * Decimal(str(qty)) * tax_r) / Decimal("100.00")
+            line_tot = (unit_p * Decimal(str(qty))) + tax_a
+            sel_mods = None
+            item_name = line_in.name or "Food Item"
+            prep_station = "KITCHEN"
+
+        instructions = line_in.special_instructions or line_in.notes
+
+        db_line = RestaurantOrderLine(
+            order_id=order.id,
+            item_id=item.id if item else None,
+            item_name=item_name,
+            variant_name=line_in.variant_name,
+            prep_station=prep_station,
+            quantity=qty,
+            unit_price=unit_p,
+            modifier_price=mod_p,
+            tax_rate=tax_r,
+            tax_amount=tax_a,
+            line_total=line_tot,
+            selected_modifiers=sel_mods,
+            special_instructions=instructions,
+            kot_status="PENDING_SEND"
+        )
+        db.add(db_line)
+        subtotal_acc += (unit_p + mod_p) * Decimal(str(qty))
+        tax_acc += tax_a
+
+    order.subtotal = subtotal_acc.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    order.tax_amount = tax_acc.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    raw_grand = order.subtotal + order.tax_amount
+    order.grand_total = raw_grand.quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
+    order.rounding_adjustment = order.grand_total - raw_grand
+
+    # Keep table in RESERVED / incoming state while awaiting confirmation
+    if table.status == "VACANT":
+        table.status = "RESERVED"
+
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+@customer_dining_router.get("/orders/{order_id}", response_model=RestaurantOrderResponse)
+def get_customer_order_status(
+    order_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Live Status Check for Customer Phone: Returns current status (PENDING_CONFIRMATION, SENT_TO_KITCHEN, SERVED).
+    """
+    parsed_uuid = None
+    try:
+        parsed_uuid = UUID(str(order_id))
+    except (ValueError, TypeError):
+        pass
+
+    order = None
+    if parsed_uuid:
+        order = db.query(RestaurantOrder).filter(RestaurantOrder.id == parsed_uuid).first()
+    if not order:
+        order = db.query(RestaurantOrder).filter(RestaurantOrder.order_number == str(order_id)).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return order
+

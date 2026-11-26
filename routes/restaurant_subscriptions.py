@@ -318,6 +318,11 @@ def resolve_tenant_id(user: Optional[User], db: Session, target_outlet_id: Optio
         if outlet and outlet.tenant_id:
             return outlet.tenant_id
 
+    # 3. Fallback: resolve from active outlet
+    first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first() or db.query(RestaurantOutlet).first()
+    if first_outlet and first_outlet.tenant_id:
+        return first_outlet.tenant_id
+
     # If no tenant context is established, return None to prevent cross-tenant leaks
     return None
 
@@ -1197,6 +1202,7 @@ def check_order_status(
 
 @router.get("/branches", response_model=List[BranchSubscriptionResponse])
 def get_branch_subscriptions(
+    outlet_id: Optional[uuid.UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user)
 ):
@@ -1204,7 +1210,7 @@ def get_branch_subscriptions(
     Returns the individual subscription status and renewal info for ALL branches of the current tenant.
     Allows multi-branch owners to see which branches are Active, Expiring, or Unpaid, and renew them individually.
     """
-    tenant_id = resolve_tenant_id(current_user, db)
+    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
     now = get_current_time()
 
     outlets = db.query(RestaurantOutlet).filter(
@@ -1292,35 +1298,14 @@ def get_subscription_history(
     """
     Get full subscription history and invoices for the restaurant tenant, optionally filtered by branch.
     """
-    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
-    tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
 
     if not tenant_id:
-        default_plan = get_or_create_default_plan(db)
-        base, gst, total = calculate_plan_amounts(default_plan.price)
-        return CurrentSubscriptionResponse(
-            has_subscription=False,
-            is_active=False,
-            status="UNPAID",
-            plan_name=default_plan.name,
-            price=base,
-            base_price=base,
-            gst_amount=gst,
-            total_price=total,
-            billing_cycle=default_plan.billing_cycle,
-            expires_at=None,
-            days_remaining=0,
-            features=default_plan.features,
-            outlet_id=None,
-            tenant_id=None,
-            invoice_number=None,
-            payment_method=None,
-            started_at=None
-        )
+        return []
 
     query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
-    if scoped_outlet_id:
-        query = query.filter(TenantSubscription.outlet_id == scoped_outlet_id)
+    if outlet_id:
+        query = query.filter(TenantSubscription.outlet_id == outlet_id)
 
     subscriptions = query.order_by(TenantSubscription.created_at.desc()).all()
     return [_enrich_subscription_response(sub) for sub in subscriptions]
@@ -1560,8 +1545,7 @@ def list_subscription_invoices(
     Includes itemized breakdown (Subtotal, 9% CGST, 9% SGST, Total), payment reference, and view/download links.
     Optionally filtered by branch outlet_id.
     """
-    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
-    tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
+    tenant_id = resolve_tenant_id(current_user, db, outlet_id)
 
     query = (
         db.query(TenantSubscription)
@@ -1572,8 +1556,8 @@ def list_subscription_invoices(
         )
         .filter(TenantSubscription.tenant_id == tenant_id)
     )
-    if scoped_outlet_id:
-        query = query.filter(TenantSubscription.outlet_id == scoped_outlet_id)
+    if outlet_id:
+        query = query.filter(TenantSubscription.outlet_id == outlet_id)
 
     subscriptions = query.order_by(TenantSubscription.started_at.desc()).all()
 

@@ -286,3 +286,133 @@ def open_table_order(
     db.refresh(order)
     return order
 
+
+# --- Table QR Code Generation & Batch Retrieval ---
+from fastapi.responses import Response
+from schemas.restaurant_table import TableQRResponse, TableQRBatchResponse, TableQRBatchItem
+import qrcode
+import io
+import base64
+import os
+
+def _generate_table_qr_data(table: RestaurantTable, outlet: Optional[RestaurantOutlet] = None, base_url: Optional[str] = None) -> tuple[str, str, bytes]:
+    domain = base_url or os.getenv("FRONTEND_ORDER_URL", "https://order.sirfbill.com")
+    outlet_id_str = str(outlet.id) if outlet else str(table.outlet_id)
+    qr_url = f"{domain.rstrip('/')}/dine-in?outlet_id={outlet_id_str}&table_id={table.id}&code={table.table_code}"
+
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(qr_url)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+    b64_str = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('utf-8')}"
+    return qr_url, b64_str, png_bytes
+
+
+@router.get("/qr/batch", response_model=TableQRBatchResponse)
+@router.get("/qr-batch", response_model=TableQRBatchResponse)
+def get_batch_table_qrs(
+    outlet_id: Optional[UUID] = None,
+    base_url: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Returns batch QR codes for all tables in the restaurant outlet (useful for bulk standee printing).
+    """
+    scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
+    if not scoped_outlet_id:
+        raise HTTPException(status_code=400, detail="Outlet context required")
+
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Outlet not found")
+
+    tables = db.query(RestaurantTable).filter(
+        RestaurantTable.outlet_id == scoped_outlet_id,
+        RestaurantTable.is_active == True
+    ).order_by(RestaurantTable.table_code.asc()).all()
+
+    items = []
+    for t in tables:
+        qr_url, b64_str, _ = _generate_table_qr_data(t, outlet, base_url)
+        items.append(TableQRBatchItem(
+            table_id=t.id,
+            table_code=t.table_code,
+            section=t.section,
+            capacity=t.capacity,
+            qr_url=qr_url,
+            qr_image_base64=b64_str
+        ))
+
+    return TableQRBatchResponse(
+        outlet_id=outlet.id,
+        outlet_name=outlet.name,
+        total_tables=len(items),
+        tables=items
+    )
+
+
+@router.get("/{table_id}/qr", response_model=TableQRResponse)
+def get_table_qr(
+    table_id: UUID,
+    base_url: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_restaurant_staff)
+):
+    """
+    Returns the table's deep link and Base64-encoded QR image.
+    Scanned by customer camera to auto-select table and open digital menu.
+    """
+    table = db.query(RestaurantTable).filter(RestaurantTable.id == table_id).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found")
+
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == table.outlet_id).first()
+    outlet_name = outlet.name if outlet else "SirfBill Restaurant"
+
+    qr_url, b64_str, _ = _generate_table_qr_data(table, outlet, base_url)
+    return TableQRResponse(
+        table_id=table.id,
+        table_code=table.table_code,
+        section=table.section,
+        capacity=table.capacity,
+        outlet_id=table.outlet_id,
+        outlet_name=outlet_name,
+        qr_url=qr_url,
+        qr_image_base64=b64_str
+    )
+
+
+@router.get("/{table_id}/qr-image")
+def get_table_qr_image(
+    table_id: UUID,
+    base_url: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Direct PNG image endpoint to display or download table QR code.
+    """
+    table = db.query(RestaurantTable).filter(RestaurantTable.id == table_id).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found")
+
+    outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == table.outlet_id).first()
+    _, _, png_bytes = _generate_table_qr_data(table, outlet, base_url)
+
+    clean_code = table.table_code.replace(" ", "_")
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="table_{clean_code}_qr.png"'}
+    )
+
+

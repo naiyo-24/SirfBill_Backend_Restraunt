@@ -567,7 +567,7 @@ app.include_router(app_version_router)
 from routes.restaurant_outlets import router as restaurant_outlets_router
 from routes.restaurant_menu import router as restaurant_menu_router
 from routes.restaurant_tables import router as restaurant_tables_router
-from routes.restaurant_orders import router as restaurant_orders_router
+from routes.restaurant_orders import router as restaurant_orders_router, customer_dining_router
 from routes.restaurant_kitchen import router as restaurant_kitchen_router
 from routes.restaurant_tenders import router as restaurant_tenders_router
 from routes.restaurant_shifts import router as restaurant_shifts_router
@@ -583,6 +583,7 @@ app.include_router(restaurant_outlets_router)
 app.include_router(restaurant_menu_router)
 app.include_router(restaurant_tables_router)
 app.include_router(restaurant_orders_router)
+app.include_router(customer_dining_router)
 app.include_router(restaurant_kitchen_router)
 app.include_router(restaurant_tenders_router)
 app.include_router(restaurant_shifts_router)

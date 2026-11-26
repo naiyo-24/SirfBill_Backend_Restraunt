@@ -95,6 +95,35 @@ class RestaurantOrderItemVoid(BaseModel):
     expected_version: Optional[int] = Field(None, description="Optimistic locking version check")
 
 
+class CustomerTableOrderCreate(BaseModel):
+    outlet_id: UUID
+    table_id: UUID
+    customer_name: Optional[str] = "Dine-in Guest"
+    customer_phone: Optional[str] = None
+    notes: Optional[str] = None
+    items: list[RestaurantOrderLineCreate]
+    idempotency_key: Optional[str] = None
+
+
+class RejectQROrderRequest(BaseModel):
+    reason: Optional[str] = "Item out of stock or table unavailable"
+
+
+class CustomerTableInfoResponse(BaseModel):
+    table_id: UUID
+    table_code: str
+    section: str
+    outlet_id: UUID
+    outlet_name: str
+    outlet_address: Optional[str] = None
+    outlet_phone: Optional[str] = None
+    currency: str = "INR"
+    tax_rate: float = 5.0
+    active_order_id: Optional[UUID] = None
+    active_order_number: Optional[str] = None
+    active_order_status: Optional[str] = None
+
+
 class RestaurantOrderResponse(BaseModel):
     id: UUID
     outlet_id: UUID

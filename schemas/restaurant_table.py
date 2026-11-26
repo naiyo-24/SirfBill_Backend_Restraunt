@@ -41,3 +41,29 @@ class RestaurantTableResponse(RestaurantTableBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class TableQRResponse(BaseModel):
+    table_id: UUID
+    table_code: str
+    section: str
+    capacity: int
+    outlet_id: UUID
+    outlet_name: str
+    qr_url: str
+    qr_image_base64: str
+
+    model_config = ConfigDict(extra="allow")
+
+class TableQRBatchItem(BaseModel):
+    table_id: UUID
+    table_code: str
+    section: str
+    capacity: int
+    qr_url: str
+    qr_image_base64: str
+
+class TableQRBatchResponse(BaseModel):
+    outlet_id: UUID
+    outlet_name: str
+    total_tables: int
+    tables: list[TableQRBatchItem]
