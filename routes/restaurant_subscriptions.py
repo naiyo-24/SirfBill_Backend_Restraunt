@@ -1080,15 +1080,22 @@ def check_order_status(
             if successful_pmt:
                 notes = rzp_order.get("notes", {})
                 tenant_id = uuid.UUID(notes.get("tenant_id")) if notes.get("tenant_id") else uuid.UUID("9f3670ca-438f-4251-984c-8fc230826a1b")
+                target_outlet_id = None
+                if notes.get("outlet_id"):
+                    try:
+                        target_outlet_id = uuid.UUID(notes.get("outlet_id"))
+                    except Exception:
+                        target_outlet_id = None
                 plan_code = notes.get("plan_code", DEFAULT_PLAN_CODE)
                 plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.plan_code == plan_code).first() or get_or_create_default_plan(db)
                 base_price, gst_amt, total_price = calculate_plan_amounts(plan.price)
 
                 now = get_current_time()
                 duration_days = plan.duration_days or 30
-                existing_sub = db.query(TenantSubscription).filter(
-                    TenantSubscription.tenant_id == tenant_id
-                ).order_by(TenantSubscription.expires_at.desc()).first()
+                existing_query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
+                if target_outlet_id:
+                    existing_query = existing_query.filter(TenantSubscription.outlet_id == target_outlet_id)
+                existing_sub = existing_query.order_by(TenantSubscription.expires_at.desc()).first()
 
                 if existing_sub and existing_sub.expires_at > now and existing_sub.status in ("ACTIVE", "TRIAL"):
                     new_start = existing_sub.started_at
@@ -1100,6 +1107,7 @@ def check_order_status(
                 invoice_no = f"INV-SUB-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
                 subscription = TenantSubscription(
                     tenant_id=tenant_id,
+                    outlet_id=target_outlet_id,
                     plan_id=plan.id,
                     status="ACTIVE",
                     price_paid=total_price,

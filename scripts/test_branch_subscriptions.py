@@ -45,12 +45,13 @@ def run_tests():
 
     # 2. Create Branch 1 (Primary)
     print("\n--- 2. Creating Branch 1 (Primary) ---")
+    code1 = f"SL_{uuid.uuid4().hex[:5]}"
     resp1 = client.post("/api/admin/shop", json={
         "name": "Taste of Bengal: Salt Lake",
-        "code": "OUTLET-SL",
+        "code": code1,
         "address": "Sector 5, Salt Lake, Kolkata",
         "city": "Kolkata",
-        "contact_number": "+919876543210",
+        "contact_number": "+919876543201",
         "status": "Active",
         "is_primary": True
     })
@@ -68,12 +69,13 @@ def run_tests():
 
     # 3. Create Branch 2 (Additional Branch)
     print("\n--- 3. Creating Branch 2 (Additional Branch) ---")
+    code2 = f"NT_{uuid.uuid4().hex[:5]}"
     resp2 = client.post("/api/admin/shop", json={
         "name": "Taste of Bengal: New Town",
-        "code": "OUTLET-NT",
+        "code": code2,
         "address": "Action Area 1, New Town, Kolkata",
         "city": "Kolkata",
-        "contact_number": "+919876543211",
+        "contact_number": "+919876543202",
         "status": "Active",
         "is_primary": False
     })

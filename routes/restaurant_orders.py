@@ -113,6 +113,14 @@ def create_order(
     if not outlet:
         raise HTTPException(status_code=404, detail="Restaurant outlet not found for this tenant")
 
+    # 3. Check Branch Subscription Status
+    from dependencies import check_active_subscription
+    if not check_active_subscription(outlet.tenant_id, db, outlet_id=outlet.id):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"Subscription for '{outlet.name}' has expired or is unpaid. Please renew your branch subscription to create orders."
+        )
+
     resolved_table_id = None
     if payload.table_id:
         try:
@@ -756,6 +764,13 @@ def send_to_kitchen(
 
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    from dependencies import check_active_subscription
+    if not check_active_subscription(order.tenant_id, db, outlet_id=order.outlet_id):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Subscription for this branch has expired or is unpaid. Please renew your branch subscription to send KOTs to kitchen."
+        )
 
     # Only fetch lines that are currently PENDING_SEND
     pending_lines = (

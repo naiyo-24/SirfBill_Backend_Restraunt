@@ -202,13 +202,14 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
     
     # Fetch assigned outlet strictly scoped to user's tenant
     outlet = None
-    if user.outlet_id:
-        outlet_query = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == user.outlet_id)
+    target_requested_outlet = getattr(request, "outlet_id", None) or user.outlet_id
+    if target_requested_outlet:
+        outlet_query = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == target_requested_outlet)
         if user.tenant_id:
             outlet_query = outlet_query.filter(RestaurantOutlet.tenant_id == user.tenant_id)
         outlet = outlet_query.first()
         # If the user had an outlet_id pointing to another tenant, disconnect it immediately
-        if not outlet and user.tenant_id:
+        if not outlet and user.tenant_id and user.outlet_id == target_requested_outlet:
             user.outlet_id = None
             db.commit()
 
@@ -242,9 +243,44 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
 
     resolved_outlet_id = str(outlet.id) if outlet else (str(user.outlet_id) if user.outlet_id else None)
 
+    # Check branch subscription status
+    from dependencies import check_active_subscription
+    target_tenant_id = user.tenant_id or (outlet.tenant_id if outlet else None)
+    target_outlet_id = outlet.id if outlet else (getattr(request, "outlet_id", None) or user.outlet_id)
+
+    is_sub_active = False
+    if target_tenant_id and target_outlet_id:
+        is_sub_active = check_active_subscription(target_tenant_id, db, outlet_id=target_outlet_id)
+    elif target_tenant_id:
+        is_sub_active = check_active_subscription(target_tenant_id, db, outlet_id=None)
+
+    # BLOCK OPERATIONAL STAFF IF BRANCH IS OUT OF SUBSCRIPTION!
+    # Operational roles: CASHIER, POS, KITCHEN, WAITER, CHEF, CAPTAIN, INVENTORY, CRM, STAFF, MANAGER
+    is_operational_role = role_upper in [
+        "CASHIER", "POS", "KITCHEN", "WAITER", "CHEF", "CAPTAIN", "INVENTORY", "CRM", "STAFF", "MANAGER"
+    ]
+
+    req_panel = str(getattr(request, "panel", "") or "").upper()
+    is_pos_terminal = req_panel in ["POS", "KITCHEN", "WAITER", "CASHIER", "KDS"]
+
+    if not is_sub_active:
+        outlet_name = outlet.name if outlet else "this branch"
+        if is_operational_role:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Subscription for '{outlet_name}' has expired or is unpaid. Please contact your restaurant administrator to renew the subscription."
+            )
+        elif is_pos_terminal:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Subscription for '{outlet_name}' has expired or is unpaid. Please renew in the Admin Portal to use this POS terminal."
+            )
+
+    sub_status = "ACTIVE" if is_sub_active else "EXPIRED"
+
     # Terminal visibility for login events
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    print(f"\n🔑 [USER LOGIN] Time: {now_str} | User: {user.email} | Role: {user.role} | Outlet: {outlet.name if outlet else 'None'} ({resolved_outlet_id})", flush=True)
+    print(f"\n🔑 [USER LOGIN] Time: {now_str} | User: {user.email} | Role: {user.role} | Outlet: {outlet.name if outlet else 'None'} ({resolved_outlet_id}) | Sub: {sub_status}", flush=True)
 
     return {
         "message": "Admin Login successful",
@@ -260,11 +296,16 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
         "assigned_outlet_id": resolved_outlet_id,
         "shop_id": resolved_outlet_id,
         "branch_id": resolved_outlet_id,
+        "is_subscription_active": is_sub_active,
+        "subscription_active": is_sub_active,
+        "subscription_status": sub_status,
         "outlet": {
             "id": str(outlet.id) if outlet else None,
             "shop_id": str(outlet.id) if outlet else None,
             "name": outlet.name if outlet else "SirfBill Grand Restaurant",
-            "code": outlet.code if outlet else "SB-01"
+            "code": outlet.code if outlet else "SB-01",
+            "is_subscription_active": is_sub_active,
+            "subscription_status": sub_status
         } if outlet else None
     }
 

@@ -17,6 +17,8 @@ class AdminLoginRequest(BaseModel):
     tenant_id: Optional[UUID] = None
     email: str
     password: str
+    outlet_id: Optional[UUID] = None
+    panel: Optional[str] = None # e.g. "POS", "KITCHEN", "WAITER", "ADMIN", "MANAGER"
 
 class LogoutRequest(BaseModel):
     user_id: Optional[str] = None

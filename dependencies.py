@@ -115,45 +115,67 @@ def get_restaurant_kitchen(current_user: User = Depends(get_current_user)) -> Us
     """Allows KITCHEN staff, MANAGER, OWNER, or ADMIN for KOT status updates."""
     return require_restaurant_roles(["KITCHEN", "MANAGER", "OWNER", "ADMIN"])(current_user)
 
-def check_active_subscription(tenant_id, db: Session) -> bool:
+def check_active_subscription(tenant_id, db: Session, outlet_id=None) -> bool:
     """
-    Checks if a tenant currently has an active or trial subscription.
+    Checks if a tenant/branch currently has an active or trial subscription.
     Evaluates against authoritative local server time (IST - Asia/Kolkata).
+    Strictly isolated per branch when outlet_id is provided.
     """
     from utils.timezone import get_current_time
     from models.restaurant_subscription import TenantSubscription
+    from uuid import UUID as PyUUID
 
-    sub = db.query(TenantSubscription).filter(
-        TenantSubscription.tenant_id == tenant_id
-    ).order_by(TenantSubscription.expires_at.desc()).first()
+    t_uuid = None
+    if tenant_id:
+        try:
+            t_uuid = PyUUID(str(tenant_id))
+        except (ValueError, TypeError):
+            t_uuid = tenant_id
+
+    o_uuid = None
+    if outlet_id:
+        try:
+            o_uuid = PyUUID(str(outlet_id))
+        except (ValueError, TypeError):
+            o_uuid = outlet_id
+
+    query = db.query(TenantSubscription)
+    if t_uuid:
+        query = query.filter(TenantSubscription.tenant_id == t_uuid)
+    if o_uuid:
+        query = query.filter(TenantSubscription.outlet_id == o_uuid)
+
+    sub = query.order_by(TenantSubscription.expires_at.desc()).first()
 
     if not sub:
         return False
 
     now = get_current_time()
-    # Active if expires_at is in the future and not cancelled
-    return (sub.expires_at > now) and (sub.status != "CANCELLED")
+    # Active if expires_at is in the future and not cancelled or pending payment
+    return (sub.expires_at > now) and (sub.status not in ("CANCELLED", "PENDING_PAYMENT", "EXPIRED"))
 
 def require_active_subscription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Dependency that enforces an active subscription.
+    Dependency that enforces an active subscription for the current branch.
     Throws HTTP 402 Payment Required if expired, triggering the payment screen across all modules.
     """
     tenant_id = current_user.tenant_id
-    if not tenant_id and current_user.outlet_id:
+    scoped_outlet_id = current_user.outlet_id
+
+    if not tenant_id and scoped_outlet_id:
         from models.restaurant_outlet import RestaurantOutlet
-        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == current_user.outlet_id).first()
+        outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == scoped_outlet_id).first()
         if outlet:
             tenant_id = outlet.tenant_id
 
-    # If tenant has no active/trial subscription, block with 402 Payment Required
-    if tenant_id and not check_active_subscription(tenant_id, db):
+    # If branch has no active/trial subscription, block with 402 Payment Required
+    if tenant_id and not check_active_subscription(tenant_id, db, outlet_id=scoped_outlet_id):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Subscription expired. Please renew your subscription plan (₹299/month) to continue using this module."
+            detail="Subscription expired for this branch. Please renew your branch subscription plan to continue using this module."
         )
 
     return current_user
