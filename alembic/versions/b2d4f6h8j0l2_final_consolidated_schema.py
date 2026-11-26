@@ -1082,6 +1082,76 @@ def upgrade() -> None:
         op.create_index(op.f('ix_restaurant_refunds_order_id'), 'restaurant_refunds', ['order_id'], unique=False)
         op.create_index(op.f('ix_restaurant_refunds_tender_id'), 'restaurant_refunds', ['tender_id'], unique=False)
 
+    # -------------------------------------------------------------
+    # Post-Migration Self-Healing / Schema Sync for Existing Tables
+    # Guarantees that even if tables already existed from an older
+    # baseline, all newly introduced multi-tenant & branch columns exist!
+    # -------------------------------------------------------------
+    healing_statements = [
+        # users
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS outlet_id UUID;",
+        "CREATE INDEX IF NOT EXISTS ix_users_tenant_id ON users(tenant_id);",
+        "CREATE INDEX IF NOT EXISTS ix_users_outlet_id ON users(outlet_id);",
+
+        # tenant_subscriptions
+        "ALTER TABLE tenant_subscriptions ADD COLUMN IF NOT EXISTS outlet_id UUID;",
+        "CREATE INDEX IF NOT EXISTS ix_tenant_subscriptions_outlet_id ON tenant_subscriptions(outlet_id);",
+        "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_subscriptions_outlet_id_fkey') THEN ALTER TABLE tenant_subscriptions ADD CONSTRAINT tenant_subscriptions_outlet_id_fkey FOREIGN KEY (outlet_id) REFERENCES restaurant_outlets(id) ON DELETE SET NULL; END IF; END $$;",
+
+        # restaurant_outlets
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS address TEXT;",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS city VARCHAR(100);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS state VARCHAR(100);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS pin_code VARCHAR(20);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS country VARCHAR(100) DEFAULT 'India';",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS phone VARCHAR(50);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS email VARCHAR(120);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS outlet_type VARCHAR(100);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS gstin VARCHAR(50);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS fssai VARCHAR(50);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS invoice_prefix VARCHAR(50);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(5, 2) DEFAULT 5.0;",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS opening_time VARCHAR(20);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS closing_time VARCHAR(20);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS weekly_closing VARCHAR(50);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS description TEXT;",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS logo_url VARCHAR;",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS upi_id VARCHAR(100);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS bank_account_no VARCHAR(50);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS bank_ifsc VARCHAR(30);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS bank_branch VARCHAR(100);",
+        "ALTER TABLE restaurant_outlets ADD COLUMN IF NOT EXISTS bank_account_name VARCHAR(150);",
+        "CREATE INDEX IF NOT EXISTS ix_restaurant_outlets_tenant_id ON restaurant_outlets(tenant_id);",
+
+        # restaurant_menu_categories
+        "ALTER TABLE restaurant_menu_categories ADD COLUMN IF NOT EXISTS icon_emoji VARCHAR(50);",
+
+        # restaurant_menu_items
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2);",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS takeaway_price NUMERIC(10, 2);",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS delivery_price NUMERIC(10, 2);",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS variant_prices JSON;",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS badge VARCHAR(50);",
+
+        # restaurant_customer_ledger
+        "ALTER TABLE restaurant_customer_ledger ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+        "ALTER TABLE restaurant_customer_ledger ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(100);",
+        "CREATE INDEX IF NOT EXISTS ix_restaurant_customer_ledger_tenant_id ON restaurant_customer_ledger(tenant_id);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_restaurant_customer_ledger_idempotency_key ON restaurant_customer_ledger(idempotency_key);",
+
+        # restaurant_recipes
+        "ALTER TABLE restaurant_recipes ADD COLUMN IF NOT EXISTS modifier_option_id UUID;",
+        "ALTER TABLE restaurant_recipes ADD COLUMN IF NOT EXISTS produced_ingredient_id UUID;",
+        "CREATE INDEX IF NOT EXISTS ix_restaurant_recipes_modifier_option_id ON restaurant_recipes(modifier_option_id);",
+        "CREATE INDEX IF NOT EXISTS ix_restaurant_recipes_produced_ingredient_id ON restaurant_recipes(produced_ingredient_id);",
+        "CREATE INDEX IF NOT EXISTS ix_restaurant_recipes_outlet_id ON restaurant_recipes(outlet_id);",
+    ]
+    for stmt in healing_statements:
+        op.execute(sa.text(stmt))
+
 
 def downgrade() -> None:
     conn = op.get_bind()

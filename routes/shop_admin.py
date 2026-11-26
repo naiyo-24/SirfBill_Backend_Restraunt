@@ -311,9 +311,19 @@ async def get_shops(
     """
     Admin Action: Get all shops/outlets for the current tenant with all 5 sections.
     """
-    query = db.query(RestaurantOutlet)
-    if admin_user and admin_user.tenant_id:
-        query = query.filter(RestaurantOutlet.tenant_id == admin_user.tenant_id)
+    effective_tenant_id = admin_user.tenant_id if admin_user else None
+    if not effective_tenant_id:
+        # If user has an assigned outlet, resolve tenant from outlet
+        if admin_user and admin_user.outlet_id:
+            out_rec = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == admin_user.outlet_id).first()
+            if out_rec and out_rec.tenant_id:
+                effective_tenant_id = out_rec.tenant_id
+
+    if not effective_tenant_id:
+        # Strict isolation: unauthenticated requests cannot see other restaurants
+        return []
+
+    query = db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == effective_tenant_id)
         
     user_role = (admin_user.role or "").upper() if admin_user else ""
     is_multi_branch = all_branches or (user_role in ['ADMIN', 'OWNER', 'SUPER_ADMIN', 'SUPERADMIN', 'MANAGER', 'INVENTORY', 'STOCK'])
@@ -416,11 +426,10 @@ async def get_shops(
             ))
         return results
 
-    # Fallback to Shop table if any
-    query = db.query(Shop)
-    if admin_user and admin_user.tenant_id:
-        query = query.filter(Shop.tenant_id == admin_user.tenant_id)
-    return query.all()
+    # Fallback to Shop table if any (strictly scoped to current tenant)
+    if effective_tenant_id:
+        return db.query(Shop).filter(Shop.tenant_id == effective_tenant_id).all()
+    return []
 
 @router.put("/{shop_id}", response_model=ShopResponse)
 @router.patch("/{shop_id}", response_model=ShopResponse)

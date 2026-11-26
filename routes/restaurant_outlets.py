@@ -25,10 +25,11 @@ def get_outlets(
     List all restaurant outlets accessible by the current tenant/user.
     Allows POS/counter sessions without hard failure.
     """
-    query = db.query(RestaurantOutlet)
     if current_user and current_user.tenant_id:
-        query = query.filter(RestaurantOutlet.tenant_id == current_user.tenant_id)
-    return query.all()
+        return db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == current_user.tenant_id).all()
+    if current_user and current_user.outlet_id:
+        return db.query(RestaurantOutlet).filter(RestaurantOutlet.id == current_user.outlet_id).all()
+    return []
 
 @router.post("", response_model=RestaurantOutletResponse, status_code=status.HTTP_201_CREATED)
 def create_outlet(

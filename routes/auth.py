@@ -221,8 +221,81 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
             ).first() or db.query(RestaurantOutlet).filter(
                 RestaurantOutlet.tenant_id == user.tenant_id
             ).first()
-        else:
-            outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first() or db.query(RestaurantOutlet).first()
+
+    # If new restaurant admin with no outlets yet, auto-provision primary branch & onboarding subscription
+    if not outlet and role_upper in ["ADMIN", "OWNER", "SUPER_ADMIN"]:
+        import uuid as py_uuid
+        from models.shop import Shop
+        from models.restaurant_subscription import TenantSubscription
+        from routes.restaurant_subscriptions import get_or_create_default_plan
+        from decimal import Decimal
+
+        if not user.tenant_id:
+            user.tenant_id = py_uuid.uuid4()
+            db.commit()
+
+        clean_name = (user.name or "Primary Restaurant").replace("Admin", "").replace("Administrator", "").strip() or "Main Branch"
+        code_prefix = "".join([c for c in clean_name.upper() if c.isalnum()][:4]) or "REST"
+        clean_code = f"{code_prefix}-{py_uuid.uuid4().hex[:4].upper()}"
+
+        new_outlet_id = target_requested_outlet if target_requested_outlet else py_uuid.uuid4()
+        outlet = RestaurantOutlet(
+            id=new_outlet_id,
+            tenant_id=user.tenant_id,
+            name=clean_name,
+            code=clean_code,
+            is_active=True,
+            service_settings={
+                "dine_in_enabled": True,
+                "takeaway_enabled": True,
+                "delivery_enabled": True,
+                "is_primary": True,
+                "extra_data": {
+                    "is_primary": True,
+                    "outlet_type": "Dine-in, Takeaway & Delivery",
+                    "country": "India",
+                    "tax_rate": 5.0
+                }
+            }
+        )
+        db.add(outlet)
+        db.flush()
+
+        shop = db.query(Shop).filter(Shop.id == outlet.id).first()
+        if not shop:
+            shop = Shop(
+                id=outlet.id,
+                tenant_id=user.tenant_id,
+                name=outlet.name,
+                code=outlet.code,
+                address="Main Branch",
+                city="Main City",
+                status="Active",
+                is_primary=True
+            )
+            db.add(shop)
+            db.flush()
+
+        default_plan = get_or_create_default_plan(db)
+        now_time = datetime.utcnow()
+        new_sub = TenantSubscription(
+            tenant_id=user.tenant_id,
+            outlet_id=outlet.id,
+            plan_id=default_plan.id,
+            status="ACTIVE",
+            price_paid=Decimal("0.00"),
+            currency="INR",
+            started_at=now_time,
+            expires_at=now_time + timedelta(days=365),
+            payment_method="FREE_TRIAL",
+            payment_reference="ONBOARDING_PROVISION",
+            invoice_number=f"SUB-{now_time.strftime('%Y%m%d')}-{py_uuid.uuid4().hex[:6].upper()}",
+            notes=f"Complimentary 1-year onboarding subscription for {outlet.name}"
+        )
+        db.add(new_sub)
+        user.outlet_id = outlet.id
+        db.commit()
+        db.refresh(user)
 
     # Self-heal missing tenant_id or orphan outlet_id on user (strictly within same tenant)
     updated = False
@@ -265,15 +338,18 @@ def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
 
     if not is_sub_active:
         outlet_name = outlet.name if outlet else "this branch"
-        if is_operational_role:
+        out_id = str(outlet.id) if outlet else (str(target_outlet_id) if target_outlet_id else None)
+        err_msg = f"Subscription for '{outlet_name}' has expired or is unpaid. Please contact your restaurant administrator to renew the subscription."
+        if is_operational_role or is_pos_terminal:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"Subscription for '{outlet_name}' has expired or is unpaid. Please contact your restaurant administrator to renew the subscription."
-            )
-        elif is_pos_terminal:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"Subscription for '{outlet_name}' has expired or is unpaid. Please renew in the Admin Portal to use this POS terminal."
+                detail={
+                    "message": err_msg,
+                    "outlet_id": out_id,
+                    "outlet_name": outlet_name,
+                    "plan_code": "RESTAURANT_PRO_299",
+                    "price": 299.0
+                }
             )
 
     sub_status = "ACTIVE" if is_sub_active else "EXPIRED"

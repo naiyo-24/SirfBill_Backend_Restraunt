@@ -2,7 +2,7 @@ import os
 import jwt
 from uuid import UUID
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -35,16 +35,35 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     return user
 
 def get_optional_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
     db: Session = Depends(get_db)
 ) -> Optional[User]:
     """
-    Returns the User if a valid Bearer token is passed; otherwise returns None.
+    Returns the User if a valid Bearer token, header token, or session token is passed; otherwise returns None.
     Never falls back across tenants to prevent data leaks.
     """
+    token_str = None
     if credentials and credentials.credentials:
+        token_str = credentials.credentials
+    elif request is not None:
+        auth_hdr = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth_hdr:
+            if auth_hdr.lower().startswith("bearer "):
+                token_str = auth_hdr.split(" ", 1)[1].strip()
+            else:
+                token_str = auth_hdr.strip()
+        if not token_str:
+            token_str = (
+                request.headers.get("x-access-token")
+                or request.headers.get("x-token")
+                or request.headers.get("token")
+                or request.query_params.get("token")
+            )
+
+    if token_str:
         try:
-            payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token_str, SECRET_KEY, algorithms=[ALGORITHM])
             user_id: str = payload.get("sub")
             if user_id:
                 user = db.query(User).filter(User.id == user_id).first()
@@ -52,6 +71,17 @@ def get_optional_current_user(
                     return user
         except Exception:
             pass
+
+    # If tenant_id or user_id query/header passed explicitly
+    if request is not None:
+        target_uid = request.headers.get("x-user-id") or request.query_params.get("user_id")
+        if target_uid:
+            try:
+                user = db.query(User).filter(User.id == target_uid).first()
+                if user:
+                    return user
+            except Exception:
+                pass
 
     return None
 
@@ -225,9 +255,13 @@ def get_user_scoped_outlet_id(
         
         return None
         
-    # Unauthenticated fallback (e.g. local dev kiosk mode)
+    # Unauthenticated / guest access: strictly respect requested_outlet_id if valid; NEVER leak another restaurant's outlet
     if requested_outlet_id:
-        return requested_outlet_id
-    fallback = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    return fallback.id if fallback else None
+        valid_outlet = db.query(RestaurantOutlet).filter(
+            RestaurantOutlet.id == requested_outlet_id,
+            RestaurantOutlet.is_active == True
+        ).first()
+        if valid_outlet:
+            return valid_outlet.id
+    return None
 

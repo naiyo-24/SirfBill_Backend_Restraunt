@@ -42,11 +42,17 @@ def get_users(
     from models.user import User
     from models.restaurant_outlet import RestaurantOutlet
 
-    query = db.query(User)
-
     effective_tenant_id = tenant_id or (current_user.tenant_id if current_user else None)
-    if effective_tenant_id:
-        query = query.filter(User.tenant_id == effective_tenant_id)
+    if not effective_tenant_id and current_user and current_user.outlet_id:
+        out_rec = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == current_user.outlet_id).first()
+        if out_rec and out_rec.tenant_id:
+            effective_tenant_id = out_rec.tenant_id
+
+    if not effective_tenant_id:
+        # Strict isolation: never return all users across restaurants to unauthenticated callers
+        return []
+
+    query = db.query(User).filter(User.tenant_id == effective_tenant_id)
     
     if role:
         query = query.filter(User.role.ilike(role))
@@ -59,7 +65,7 @@ def get_users(
         )
         
     users = query.offset(skip).limit(limit).all()
-    outlets = {o.id: o.name for o in db.query(RestaurantOutlet).all()}
+    outlets = {o.id: o.name for o in db.query(RestaurantOutlet).filter(RestaurantOutlet.tenant_id == effective_tenant_id).all()}
 
     results = []
     for u in users:

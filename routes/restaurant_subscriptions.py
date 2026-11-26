@@ -318,12 +318,8 @@ def resolve_tenant_id(user: Optional[User], db: Session, target_outlet_id: Optio
         if outlet and outlet.tenant_id:
             return outlet.tenant_id
 
-    # Fallback to first available active outlet
-    first_outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.is_active == True).first()
-    if first_outlet and first_outlet.tenant_id:
-        return first_outlet.tenant_id
-
-    return uuid.uuid4()
+    # If no tenant context is established, return None to prevent cross-tenant leaks
+    return None
 
 
 def resolve_valid_outlet_id(db: Session, target_outlet_id: Optional[uuid.UUID], tenant_id: Optional[uuid.UUID] = None, user: Optional[User] = None) -> Optional[uuid.UUID]:
@@ -562,6 +558,26 @@ def get_subscription_status(
     tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
     now = get_current_time()
 
+    if not tenant_id:
+        default_plan = get_or_create_default_plan(db)
+        base, _, total = calculate_plan_amounts(default_plan.price)
+        return SubscriptionStatusResponse(
+            has_subscription=False,
+            is_active=False,
+            status="UNPAID",
+            plan_name=default_plan.name,
+            price=base,
+            base_price=base,
+            gst_note="GST (18%) Excluded",
+            total_price=total,
+            billing_cycle=default_plan.billing_cycle,
+            expires_at=None,
+            days_remaining=0,
+            features=default_plan.features,
+            outlet_id=None,
+            tenant_id=None
+        )
+
     # Query subscription explicitly for this branch
     query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
     if scoped_outlet_id:
@@ -658,6 +674,29 @@ def get_current_subscription(
     """
     scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
     tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
+
+    if not tenant_id:
+        default_plan = get_or_create_default_plan(db)
+        base, gst, total = calculate_plan_amounts(default_plan.price)
+        return CurrentSubscriptionResponse(
+            has_subscription=False,
+            is_active=False,
+            status="UNPAID",
+            plan_name=default_plan.name,
+            price=base,
+            base_price=base,
+            gst_amount=gst,
+            total_price=total,
+            billing_cycle=default_plan.billing_cycle,
+            expires_at=None,
+            days_remaining=0,
+            features=default_plan.features,
+            outlet_id=None,
+            tenant_id=None,
+            invoice_number=None,
+            payment_method=None,
+            started_at=None
+        )
 
     query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
     if scoped_outlet_id:
@@ -1256,6 +1295,29 @@ def get_subscription_history(
     scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
     tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
 
+    if not tenant_id:
+        default_plan = get_or_create_default_plan(db)
+        base, gst, total = calculate_plan_amounts(default_plan.price)
+        return CurrentSubscriptionResponse(
+            has_subscription=False,
+            is_active=False,
+            status="UNPAID",
+            plan_name=default_plan.name,
+            price=base,
+            base_price=base,
+            gst_amount=gst,
+            total_price=total,
+            billing_cycle=default_plan.billing_cycle,
+            expires_at=None,
+            days_remaining=0,
+            features=default_plan.features,
+            outlet_id=None,
+            tenant_id=None,
+            invoice_number=None,
+            payment_method=None,
+            started_at=None
+        )
+
     query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
     if scoped_outlet_id:
         query = query.filter(TenantSubscription.outlet_id == scoped_outlet_id)
@@ -1582,6 +1644,29 @@ def get_latest_subscription_invoice(
     """
     scoped_outlet_id = get_user_scoped_outlet_id(db, current_user, outlet_id)
     tenant_id = resolve_tenant_id(current_user, db, scoped_outlet_id)
+
+    if not tenant_id:
+        default_plan = get_or_create_default_plan(db)
+        base, gst, total = calculate_plan_amounts(default_plan.price)
+        return CurrentSubscriptionResponse(
+            has_subscription=False,
+            is_active=False,
+            status="UNPAID",
+            plan_name=default_plan.name,
+            price=base,
+            base_price=base,
+            gst_amount=gst,
+            total_price=total,
+            billing_cycle=default_plan.billing_cycle,
+            expires_at=None,
+            days_remaining=0,
+            features=default_plan.features,
+            outlet_id=None,
+            tenant_id=None,
+            invoice_number=None,
+            payment_method=None,
+            started_at=None
+        )
 
     query = db.query(TenantSubscription).filter(TenantSubscription.tenant_id == tenant_id)
     if scoped_outlet_id:
