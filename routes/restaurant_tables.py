@@ -292,7 +292,7 @@ from fastapi.responses import Response
 from schemas.restaurant_table import TableQRResponse, TableQRBatchResponse, TableQRBatchItem
 import qrcode
 from qrcode.image.styledpil import StyledPilImage
-from qrcode.image.styles.moduledrawers.pil import HorizontalBarsDrawer, StyledPilQRModuleDrawer
+from qrcode.image.styles.moduledrawers.pil import CircleModuleDrawer, StyledPilQRModuleDrawer
 from PIL import Image, ImageDraw
 import io
 import base64
@@ -337,7 +337,7 @@ def _render_styled_table_qr(
 
     qr = qrcode.QRCode(
         version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=eff_box,
         border=eff_border,
     )
@@ -346,7 +346,7 @@ def _render_styled_table_qr(
 
     img = qr.make_image(
         image_factory=StyledPilImage,
-        module_drawer=HorizontalBarsDrawer(vertical_shrink=0.82),
+        module_drawer=CircleModuleDrawer(),
         eye_drawer=_BlankEyeDrawer()
     )
 
@@ -367,14 +367,22 @@ def _render_styled_table_qr(
         # Clear eye module zone to pure white
         draw.rectangle([x, y, x + eye_size, y + eye_size], fill=(255, 255, 255, 255))
 
-        # Outer circular ring: 7 modules diameter
-        draw.ellipse([x, y, x + eye_size, y + eye_size], fill=(0, 0, 0, 255))
+        # Outer rounded-square ring: 7 modules
+        draw.rounded_rectangle(
+            [x, y, x + eye_size, y + eye_size],
+            radius=int(2.2 * eff_box),
+            fill=(0, 0, 0, 255)
+        )
 
-        # White ring gap: 5 modules diameter (margin of 1 module)
+        # White rounded-square gap: 5 modules (margin of 1 module)
         m1 = eff_box
-        draw.ellipse([x + m1, y + m1, x + eye_size - m1, y + eye_size - m1], fill=(255, 255, 255, 255))
+        draw.rounded_rectangle(
+            [x + m1, y + m1, x + eye_size - m1, y + eye_size - m1],
+            radius=int(1.4 * eff_box),
+            fill=(255, 255, 255, 255)
+        )
 
-        # Inner solid pupil: 3 modules diameter (margin of 2 modules)
+        # Inner solid circular pupil: 3 modules diameter (margin of 2 modules)
         m2 = 2 * eff_box
         draw.ellipse([x + m2, y + m2, x + eye_size - m2, y + eye_size - m2], fill=(0, 0, 0, 255))
 
