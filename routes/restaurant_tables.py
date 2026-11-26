@@ -1,6 +1,6 @@
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from models.database import get_db
@@ -291,30 +291,124 @@ def open_table_order(
 from fastapi.responses import Response
 from schemas.restaurant_table import TableQRResponse, TableQRBatchResponse, TableQRBatchItem
 import qrcode
+from qrcode.image.styledpil import StyledPilImage
+from qrcode.image.styles.moduledrawers.pil import HorizontalBarsDrawer, StyledPilQRModuleDrawer
+from PIL import Image, ImageDraw
 import io
 import base64
 import os
 
-def _generate_table_qr_data(table: RestaurantTable, outlet: Optional[RestaurantOutlet] = None, base_url: Optional[str] = None) -> tuple[str, str, bytes]:
+class _BlankEyeDrawer(StyledPilQRModuleDrawer):
+    def drawrect(self, box, is_active):
+        # Eyes will be custom drawn as smooth circular doughnut rings
+        pass
+
+def _render_styled_table_qr(
+    qr_url: str,
+    box_size: int = 18,
+    border: int = 3,
+    corner_radius: int = 40,
+    style: str = "modern"
+) -> bytes:
+    """
+    Renders high-definition QR code matching the modern pill-bar style:
+    - Contiguous horizontal modules rendered as smooth rounded capsules/bars
+    - Three corner finder eyes rendered as circular concentric doughnut rings
+    - Anti-aliased high-resolution output with rounded card corners
+    """
+    if style == "classic":
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=box_size,
+            border=border,
+        )
+        qr.add_data(qr_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    # 2x supersampling factor for ultra-crisp anti-aliasing
+    SCALE = 2
+    eff_box = box_size * SCALE
+    eff_border = border * SCALE
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=eff_box,
+        border=eff_border,
+    )
+    qr.add_data(qr_url)
+    qr.make(fit=True)
+
+    img = qr.make_image(
+        image_factory=StyledPilImage,
+        module_drawer=HorizontalBarsDrawer(vertical_shrink=0.82),
+        eye_drawer=_BlankEyeDrawer()
+    )
+
+    pil_img = img._img.convert("RGBA")
+    width_modules = qr.modules_count
+
+    # Coordinates of 3 finder eyes
+    eyes = [
+        (eff_border * eff_box, eff_border * eff_box),
+        ((eff_border + width_modules - 7) * eff_box, eff_border * eff_box),
+        (eff_border * eff_box, (eff_border + width_modules - 7) * eff_box),
+    ]
+
+    eye_size = 7 * eff_box
+    draw = ImageDraw.Draw(pil_img)
+
+    for x, y in eyes:
+        # Clear eye module zone to pure white
+        draw.rectangle([x, y, x + eye_size, y + eye_size], fill=(255, 255, 255, 255))
+
+        # Outer circular ring: 7 modules diameter
+        draw.ellipse([x, y, x + eye_size, y + eye_size], fill=(0, 0, 0, 255))
+
+        # White ring gap: 5 modules diameter (margin of 1 module)
+        m1 = eff_box
+        draw.ellipse([x + m1, y + m1, x + eye_size - m1, y + eye_size - m1], fill=(255, 255, 255, 255))
+
+        # Inner solid pupil: 3 modules diameter (margin of 2 modules)
+        m2 = 2 * eff_box
+        draw.ellipse([x + m2, y + m2, x + eye_size - m2, y + eye_size - m2], fill=(0, 0, 0, 255))
+
+    # Downsample back to target size for crisp anti-aliased curves
+    final_w = pil_img.width // SCALE
+    final_h = pil_img.height // SCALE
+    final_img = pil_img.resize((final_w, final_h), Image.Resampling.LANCZOS)
+
+    # Apply squircle rounded card corners
+    mask = Image.new("L", (final_w, final_h), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle([0, 0, final_w - 1, final_h - 1], radius=corner_radius, fill=255)
+
+    card_img = Image.new("RGBA", (final_w, final_h), (255, 255, 255, 0))
+    card_img.paste(final_img, (0, 0), mask=mask)
+
+    buf = io.BytesIO()
+    card_img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _generate_table_qr_data(
+    table: RestaurantTable,
+    outlet: Optional[RestaurantOutlet] = None,
+    base_url: Optional[str] = None,
+    style: str = "modern"
+) -> tuple[str, str, bytes]:
     domain = base_url or os.getenv("FRONTEND_ORDER_URL", "")
     if not domain:
         domain = "http://localhost:59003"
     outlet_id_str = str(outlet.id) if outlet else str(table.outlet_id)
     qr_url = f"{domain.rstrip('/')}/#/table-order?outlet_id={outlet_id_str}&table_id={table.id}&code={table.table_code}"
 
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=10,
-        border=2,
-    )
-    qr.add_data(qr_url)
-    qr.make(fit=True)
-
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    png_bytes = buf.getvalue()
+    png_bytes = _render_styled_table_qr(qr_url, style=style)
     b64_str = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('utf-8')}"
     return qr_url, b64_str, png_bytes
 
@@ -324,6 +418,7 @@ def _generate_table_qr_data(table: RestaurantTable, outlet: Optional[RestaurantO
 def get_batch_table_qrs(
     outlet_id: Optional[UUID] = None,
     base_url: Optional[str] = None,
+    style: str = Query("modern", description="QR style: 'modern' (pill capsules & circular eyes) or 'classic'"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
@@ -345,7 +440,7 @@ def get_batch_table_qrs(
 
     items = []
     for t in tables:
-        qr_url, b64_str, _ = _generate_table_qr_data(t, outlet, base_url)
+        qr_url, b64_str, _ = _generate_table_qr_data(t, outlet, base_url, style=style)
         items.append(TableQRBatchItem(
             table_id=t.id,
             table_code=t.table_code,
@@ -367,6 +462,7 @@ def get_batch_table_qrs(
 def get_table_qr(
     table_id: UUID,
     base_url: Optional[str] = None,
+    style: str = Query("modern", description="QR style: 'modern' (pill capsules & circular eyes) or 'classic'"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_restaurant_staff)
 ):
@@ -381,7 +477,7 @@ def get_table_qr(
     outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == table.outlet_id).first()
     outlet_name = outlet.name if outlet else "SirfBill Restaurant"
 
-    qr_url, b64_str, _ = _generate_table_qr_data(table, outlet, base_url)
+    qr_url, b64_str, _ = _generate_table_qr_data(table, outlet, base_url, style=style)
     return TableQRResponse(
         table_id=table.id,
         table_code=table.table_code,
@@ -398,6 +494,7 @@ def get_table_qr(
 def get_table_qr_image(
     table_id: UUID,
     base_url: Optional[str] = None,
+    style: str = Query("modern", description="QR style: 'modern' (pill capsules & circular eyes) or 'classic'"),
     db: Session = Depends(get_db)
 ):
     """
@@ -408,7 +505,7 @@ def get_table_qr_image(
         raise HTTPException(status_code=404, detail="Table not found")
 
     outlet = db.query(RestaurantOutlet).filter(RestaurantOutlet.id == table.outlet_id).first()
-    _, _, png_bytes = _generate_table_qr_data(table, outlet, base_url)
+    _, _, png_bytes = _generate_table_qr_data(table, outlet, base_url, style=style)
 
     clean_code = table.table_code.replace(" ", "_")
     return Response(
