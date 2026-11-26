@@ -1128,13 +1128,85 @@ def upgrade() -> None:
 
         # restaurant_menu_categories
         "ALTER TABLE restaurant_menu_categories ADD COLUMN IF NOT EXISTS icon_emoji VARCHAR(50);",
+        "ALTER TABLE restaurant_menu_categories ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;",
 
         # restaurant_menu_items
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS short_code VARCHAR(30);",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(20) DEFAULT 'NON_VEG';",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS prep_station VARCHAR(50) DEFAULT 'KITCHEN';",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(5, 2) DEFAULT 5.00;",
         "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2);",
         "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS takeaway_price NUMERIC(10, 2);",
         "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS delivery_price NUMERIC(10, 2);",
         "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS variant_prices JSON;",
         "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS badge VARCHAR(50);",
+        "ALTER TABLE restaurant_menu_items ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;",
+
+        # restaurant_tables
+        "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS table_code VARCHAR(50);",
+        "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS section VARCHAR(50) DEFAULT 'Main Hall';",
+        "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS capacity INTEGER DEFAULT 4;",
+        "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'VACANT';",
+        "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;",
+        "CREATE INDEX IF NOT EXISTS ix_restaurant_tables_outlet_active ON restaurant_tables(outlet_id, is_active);",
+
+        # restaurant_orders
+        "ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS order_type VARCHAR(30) DEFAULT 'DINE_IN';",
+        "ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(150);",
+        "ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(20);",
+        "ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS rounding_adjustment NUMERIC(10, 2) DEFAULT 0.00;",
+        "ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;",
+        "ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(100);",
+        "CREATE INDEX IF NOT EXISTS idx_orders_outlet_status ON restaurant_orders(outlet_id, status);",
+        "CREATE INDEX IF NOT EXISTS idx_orders_customer_phone ON restaurant_orders(customer_phone);",
+
+        # restaurant_order_lines
+        "ALTER TABLE restaurant_order_lines ADD COLUMN IF NOT EXISTS variant_name VARCHAR(100);",
+        "ALTER TABLE restaurant_order_lines ADD COLUMN IF NOT EXISTS prep_station VARCHAR(50) DEFAULT 'KITCHEN';",
+        "ALTER TABLE restaurant_order_lines ADD COLUMN IF NOT EXISTS modifier_price NUMERIC(10, 2) DEFAULT 0.00;",
+        "ALTER TABLE restaurant_order_lines ADD COLUMN IF NOT EXISTS selected_modifiers JSON;",
+        "ALTER TABLE restaurant_order_lines ADD COLUMN IF NOT EXISTS special_instructions TEXT;",
+        "ALTER TABLE restaurant_order_lines ADD COLUMN IF NOT EXISTS kot_status VARCHAR(30) DEFAULT 'PENDING';",
+
+        # restaurant_kitchen_tickets & ticket_items
+        "ALTER TABLE restaurant_kitchen_tickets ADD COLUMN IF NOT EXISTS station VARCHAR(50) DEFAULT 'KITCHEN';",
+        "ALTER TABLE restaurant_kitchen_tickets ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'FIRED';",
+        "ALTER TABLE restaurant_kitchen_tickets ADD COLUMN IF NOT EXISTS is_reprint BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE restaurant_kitchen_tickets ADD COLUMN IF NOT EXISTS reprint_count INTEGER DEFAULT 0;",
+        "ALTER TABLE restaurant_kitchen_ticket_items ADD COLUMN IF NOT EXISTS variant_name VARCHAR(100);",
+        "ALTER TABLE restaurant_kitchen_ticket_items ADD COLUMN IF NOT EXISTS modifiers_summary TEXT;",
+        "ALTER TABLE restaurant_kitchen_ticket_items ADD COLUMN IF NOT EXISTS special_instructions TEXT;",
+        "ALTER TABLE restaurant_kitchen_ticket_items ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'PENDING';",
+
+        # restaurant_ingredients (inventory & procurement integration)
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS category_id UUID;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS storage_zone VARCHAR(100);",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS storage_location VARCHAR(100);",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS purchase_uom VARCHAR(20) DEFAULT 'KG';",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS recipe_uom VARCHAR(20) DEFAULT 'G';",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS uom_conversion_factor NUMERIC(12, 4) DEFAULT 1.0000;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS min_par_level NUMERIC(12, 3) DEFAULT 0.000;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS ideal_par_level NUMERIC(12, 3) DEFAULT 0.000;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS cost_per_purchase_unit NUMERIC(10, 2) DEFAULT 0.00;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS primary_supplier_id UUID;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS is_perishable BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS shelf_life_days INTEGER;",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS last_restocked_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();",
+        "ALTER TABLE restaurant_ingredients ADD COLUMN IF NOT EXISTS image_url TEXT;",
+
+        # shops
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS account_holder_name VARCHAR;",
+
+        # High-performance Trigram GIN indexes
+        "CREATE INDEX IF NOT EXISTS idx_menu_items_name_trgm ON restaurant_menu_items USING gin (name gin_trgm_ops);",
+        "CREATE INDEX IF NOT EXISTS idx_menu_items_shortcode_trgm ON restaurant_menu_items USING gin (short_code gin_trgm_ops);",
+        "CREATE INDEX IF NOT EXISTS idx_menu_items_outlet_active ON restaurant_menu_items (outlet_id, is_active);",
+        "CREATE INDEX IF NOT EXISTS idx_customers_name_trgm ON restaurant_customers USING gin (name gin_trgm_ops);",
+        "CREATE INDEX IF NOT EXISTS idx_customers_phone_trgm ON restaurant_customers USING gin (phone gin_trgm_ops);",
+        "CREATE INDEX IF NOT EXISTS idx_customers_outlet_active ON restaurant_customers (outlet_id, is_active);",
+        "CREATE INDEX IF NOT EXISTS idx_users_name_trgm ON users USING gin (name gin_trgm_ops);",
+        "CREATE INDEX IF NOT EXISTS idx_users_phone_trgm ON users USING gin (phone gin_trgm_ops);",
+        "CREATE INDEX IF NOT EXISTS idx_users_tenant_role ON users (tenant_id, role);",
 
         # restaurant_customer_ledger
         "ALTER TABLE restaurant_customer_ledger ADD COLUMN IF NOT EXISTS tenant_id UUID;",
