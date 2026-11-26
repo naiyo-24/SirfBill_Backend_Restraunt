@@ -296,9 +296,11 @@ import base64
 import os
 
 def _generate_table_qr_data(table: RestaurantTable, outlet: Optional[RestaurantOutlet] = None, base_url: Optional[str] = None) -> tuple[str, str, bytes]:
-    domain = base_url or os.getenv("FRONTEND_ORDER_URL", "https://order.sirfbill.com")
+    domain = base_url or os.getenv("FRONTEND_ORDER_URL", "")
+    if not domain:
+        domain = "http://localhost:59003"
     outlet_id_str = str(outlet.id) if outlet else str(table.outlet_id)
-    qr_url = f"{domain.rstrip('/')}/dine-in?outlet_id={outlet_id_str}&table_id={table.id}&code={table.table_code}"
+    qr_url = f"{domain.rstrip('/')}/#/table-order?outlet_id={outlet_id_str}&table_id={table.id}&code={table.table_code}"
 
     qr = qrcode.QRCode(
         version=1,
