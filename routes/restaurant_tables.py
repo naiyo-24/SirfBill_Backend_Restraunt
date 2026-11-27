@@ -572,7 +572,7 @@ def _generate_table_qr_data(
 ) -> tuple[str, str, bytes]:
     domain = base_url or os.getenv("FRONTEND_ORDER_URL", "")
     if not domain:
-        domain = "http://localhost:59003"
+        domain = "https://sirfbillrestaurant.naiyo24.com"
     outlet_id_str = str(outlet.id) if outlet else str(table.outlet_id)
     qr_url = f"{domain.rstrip('/')}/#/table-order?outlet_id={outlet_id_str}&table_id={table.id}&code={table.table_code}"
 
