@@ -24,7 +24,7 @@ class RestaurantOrder(Base):
     status = Column(String(30), default="OPEN", nullable=False, index=True)
 
     table_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_tables.id", ondelete="SET NULL"), nullable=True, index=True)
-    customer_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_customers.id", ondelete="SET NULL"), nullable=True)
     customer_name = Column(String(150), nullable=True)
     customer_phone = Column(String(20), nullable=True)
 
@@ -56,3 +56,14 @@ class RestaurantOrder(Base):
     lines = relationship("RestaurantOrderLine", back_populates="order", cascade="all, delete-orphan")
     kitchen_tickets = relationship("RestaurantKitchenTicket", back_populates="order", cascade="all, delete-orphan")
     tenders = relationship("RestaurantTender", back_populates="order", cascade="all, delete-orphan")
+
+    @property
+    def is_settled(self) -> bool:
+        return self.status == "COMPLETED"
+
+    @property
+    def settlement_message(self) -> str:
+        if self.status == "COMPLETED":
+            return "Thank you for dining with us! Your order has been settled."
+        return ""
+

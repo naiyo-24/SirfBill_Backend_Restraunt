@@ -687,7 +687,7 @@ def upgrade() -> None:
         sa.Column('idempotency_key', sa.String(length=100), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['customer_id'], ['users.id'], ondelete='SET NULL'),
+        sa.ForeignKeyConstraint(['customer_id'], ['restaurant_customers.id'], ondelete='SET NULL'),
         sa.ForeignKeyConstraint(['outlet_id'], ['restaurant_outlets.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['shift_id'], ['restaurant_shifts.id'], ondelete='SET NULL'),
         sa.ForeignKeyConstraint(['table_id'], ['restaurant_tables.id'], ondelete='SET NULL'),

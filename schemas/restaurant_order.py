@@ -109,6 +109,16 @@ class RejectQROrderRequest(BaseModel):
     reason: Optional[str] = "Item out of stock or table unavailable"
 
 
+class CustomerTableOrderLineSummary(BaseModel):
+    id: UUID
+    item_name: str
+    variant_name: Optional[str] = None
+    quantity: int
+    unit_price: float
+    line_total: float
+    kot_status: Optional[str] = "PENDING_SEND"
+
+
 class CustomerTableInfoResponse(BaseModel):
     table_id: UUID
     table_code: str
@@ -123,6 +133,20 @@ class CustomerTableInfoResponse(BaseModel):
     active_order_id: Optional[UUID] = None
     active_order_number: Optional[str] = None
     active_order_status: Optional[str] = None
+    # Prefilled customer info for re-ordering / adding items
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    prefill_name: Optional[str] = None
+    prefill_phone: Optional[str] = None
+    active_order_customer_name: Optional[str] = None
+    active_order_customer_phone: Optional[str] = None
+    active_order_grand_total: Optional[float] = 0.0
+    active_order_items_count: Optional[int] = 0
+    active_order_lines: List[CustomerTableOrderLineSummary] = []
+    # Settlement & Thank You states
+    is_settled: bool = False
+    show_thank_you: bool = False
+    settlement_message: Optional[str] = None
 
 
 class RestaurantOrderResponse(BaseModel):
@@ -152,5 +176,7 @@ class RestaurantOrderResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     lines: List[RestaurantOrderLineResponse] = []
+    is_settled: Optional[bool] = False
+    settlement_message: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
