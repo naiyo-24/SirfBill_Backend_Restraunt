@@ -288,6 +288,9 @@ def get_orders(
         query = query.filter(RestaurantOrder.customer_id == customer_id)
     if status_filter:
         query = query.filter(RestaurantOrder.status == status_filter)
+    elif current_user and current_user.role and current_user.role.upper() == "KITCHEN":
+        # KDS terminal polling orders without status filter: only show active kitchen orders
+        query = query.filter(RestaurantOrder.status.in_(["OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY"]))
     if table_id:
         query = query.filter(RestaurantOrder.table_id == table_id)
 
@@ -982,6 +985,11 @@ def transition_order_status(
 
     new_status = str(new_status).upper()
 
+    if order.status == "COMPLETED" and new_status not in ["COMPLETED", "VOIDED"]:
+        raise HTTPException(status_code=400, detail="Cannot modify or re-open a settled order")
+    if order.status in ["CANCELLED", "VOIDED"]:
+        raise HTTPException(status_code=400, detail=f"Cannot modify an order that is already '{order.status}'")
+
     # Allow cancellation for all staff on POS/kiosk terminals (or Manager/Cashier/Admin)
     allowed_cancellation_roles = ["MANAGER", "OWNER", "ADMIN", "CASHIER", "WAITER", "STAFF"]
     if new_status in ["CANCELLED", "VOIDED"] and current_user and current_user.role and current_user.role.upper() not in allowed_cancellation_roles:
@@ -1032,18 +1040,37 @@ def transition_order_status(
                 )
             line.kot_status = "CANCELLED"
 
+        kitchen_tickets = db.query(RestaurantKitchenTicket).filter(RestaurantKitchenTicket.order_id == order.id).all()
+        for kt in kitchen_tickets:
+            kt.status = "CANCELLED"
+            kt.completed_at = get_current_time()
+            for itm in (kt.items or []):
+                itm.status = "CANCELLED"
+
     # Direct Counter / Takeaway Billing: If completing an order that had un-sent lines, deduct them now
     if new_status == "COMPLETED":
-        pending_lines = [l for l in (order.lines or []) if l.kot_status == "PENDING_SEND" and l.quantity > 0]
-        for line in pending_lines:
-            _deduct_order_line_stock(
-                db=db,
-                order=order,
-                line=line,
-                quantity=line.quantity,
-                actor_id=current_user.id if current_user else None
-            )
-            line.kot_status = "SERVED"
+        for line in (order.lines or []):
+            if line.kot_status == "PENDING_SEND" and line.quantity > 0:
+                _deduct_order_line_stock(
+                    db=db,
+                    order=order,
+                    line=line,
+                    quantity=line.quantity,
+                    actor_id=current_user.id if current_user else None
+                )
+            if line.kot_status != "CANCELLED":
+                line.kot_status = "SERVED"
+
+        kitchen_tickets = db.query(RestaurantKitchenTicket).filter(
+            RestaurantKitchenTicket.order_id == order.id,
+            RestaurantKitchenTicket.status != "CANCELLED"
+        ).all()
+        for kt in kitchen_tickets:
+            kt.status = "SERVED"
+            kt.completed_at = get_current_time()
+            for itm in (kt.items or []):
+                if itm.status != "CANCELLED":
+                    itm.status = "SERVED"
 
     # Free up table if order finished or cancelled
     if new_status in ["COMPLETED", "CANCELLED", "VOIDED"] and order.table_id:
@@ -1464,6 +1491,13 @@ def reject_qr_order(
     # Mark lines as CANCELLED
     for line in order.lines:
         line.kot_status = "CANCELLED"
+
+    kitchen_tickets = db.query(RestaurantKitchenTicket).filter(RestaurantKitchenTicket.order_id == order.id).all()
+    for kt in kitchen_tickets:
+        kt.status = "CANCELLED"
+        kt.completed_at = get_current_time()
+        for itm in (kt.items or []):
+            itm.status = "CANCELLED"
 
     # If table has no other active orders, reset table to VACANT
     if order.table_id:

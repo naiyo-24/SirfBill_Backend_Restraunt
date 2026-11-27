@@ -41,8 +41,11 @@ def get_kitchen_tickets(
     if status_filter:
         query = query.filter(RestaurantKitchenTicket.status == status_filter)
     else:
-        # By default exclude served/cancelled tickets
-        query = query.filter(RestaurantKitchenTicket.status.in_(["PENDING", "PREPARING", "READY"]))
+        # By default exclude served/cancelled tickets and orders that are completed/cancelled
+        query = query.filter(
+            RestaurantKitchenTicket.status.in_(["PENDING", "PREPARING", "READY"]),
+            RestaurantOrder.status.in_(["OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY"])
+        )
 
     return query.order_by(RestaurantKitchenTicket.created_at.asc()).all()
 

@@ -293,7 +293,7 @@ from schemas.restaurant_table import TableQRResponse, TableQRBatchResponse, Tabl
 import qrcode
 from qrcode.image.styledpil import StyledPilImage
 from qrcode.image.styles.moduledrawers.pil import CircleModuleDrawer, StyledPilQRModuleDrawer
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
 import os
@@ -404,6 +404,166 @@ def _render_styled_table_qr(
     return buf.getvalue()
 
 
+def _load_qr_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    font_path = (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    )
+    try:
+        return ImageFont.truetype(font_path, size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _load_outlet_logo(logo_url: Optional[str]) -> Optional[Image.Image]:
+    if not logo_url:
+        return None
+    rel_path = logo_url.lstrip("/")
+    for candidate in (rel_path, os.path.join("/app", rel_path)):
+        if os.path.isfile(candidate):
+            try:
+                return Image.open(candidate).convert("RGBA")
+            except Exception:
+                return None
+    return None
+
+
+def _render_table_qr_card(
+    qr_png_bytes: bytes,
+    outlet_name: str,
+    table_code: str,
+    section: Optional[str] = None,
+    logo_url: Optional[str] = None,
+) -> bytes:
+    """
+    Wraps the styled QR code in a print-ready table standee card with:
+    - Restaurant logo & name at the top
+    - Crisp centered QR code
+    - Table badge & scan prompt at the bottom
+    """
+    CARD_W = 760
+    PAD_X = 48
+    qr_size = 460
+
+    logo_img = _load_outlet_logo(logo_url)
+    title_font = _load_qr_font(34, bold=True)
+    badge_font = _load_qr_font(26, bold=True)
+    sub_font = _load_qr_font(22, bold=False)
+
+    # Measure header height
+    y_cursor = 44
+    logo_draw_size = None
+    if logo_img:
+        max_lw, max_lh = 220, 96
+        ratio = min(max_lw / logo_img.width, max_lh / logo_img.height, 1.0)
+        lw = max(1, int(logo_img.width * ratio))
+        lh = max(1, int(logo_img.height * ratio))
+        logo_draw_size = (lw, lh)
+        y_cursor += lh + 18
+
+    # Measure outlet name
+    dummy_img = Image.new("RGBA", (CARD_W, 100))
+    dummy_draw = ImageDraw.Draw(dummy_img)
+    name_text = (outlet_name or "SirfBill Restaurant").strip()
+    bbox = dummy_draw.textbbox((0, 0), name_text, font=title_font)
+    text_w = bbox[2] - bbox[0]
+    if text_w > CARD_W - 2 * PAD_X:
+        title_font = _load_qr_font(26, bold=True)
+        bbox = dummy_draw.textbbox((0, 0), name_text, font=title_font)
+    name_h = bbox[3] - bbox[1]
+    y_cursor += name_h + 24
+
+    # Divider + spacing before QR
+    divider_y = y_cursor
+    y_cursor += 28
+
+    qr_y = y_cursor
+    y_cursor += qr_size + 28
+
+    # Table badge pill
+    badge_text = f"TABLE {table_code.upper()}"
+    b_bbox = dummy_draw.textbbox((0, 0), badge_text, font=badge_font)
+    bw = (b_bbox[2] - b_bbox[0]) + 48
+    bh = (b_bbox[3] - b_bbox[1]) + 22
+    badge_y = y_cursor
+    y_cursor += bh + 16
+
+    if section:
+        sec_bbox = dummy_draw.textbbox((0, 0), section, font=sub_font)
+        sec_h = sec_bbox[3] - sec_bbox[1]
+        sec_y = y_cursor
+        y_cursor += sec_h + 12
+    else:
+        sec_y = None
+
+    cta_text = "Scan to View Menu & Order"
+    cta_bbox = dummy_draw.textbbox((0, 0), cta_text, font=sub_font)
+    cta_h = cta_bbox[3] - cta_bbox[1]
+    cta_y = y_cursor
+    y_cursor += cta_h + 44
+
+    CARD_H = y_cursor
+    card = Image.new("RGBA", (CARD_W, CARD_H), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(card)
+
+    # Subtle outer border
+    draw.rounded_rectangle(
+        [2, 2, CARD_W - 3, CARD_H - 3],
+        radius=36,
+        fill=(255, 255, 255, 255),
+        outline=(226, 232, 240, 255),
+        width=3,
+    )
+
+    # Draw logo
+    cur_y = 44
+    if logo_img and logo_draw_size:
+        lw, lh = logo_draw_size
+        resized_logo = logo_img.resize((lw, lh), Image.Resampling.LANCZOS)
+        card.paste(resized_logo, ((CARD_W - lw) // 2, cur_y), mask=resized_logo)
+        cur_y += lh + 18
+
+    # Draw restaurant name
+    nb = draw.textbbox((0, 0), name_text, font=title_font)
+    nw = nb[2] - nb[0]
+    draw.text(((CARD_W - nw) // 2, cur_y), name_text, fill=(15, 23, 42, 255), font=title_font)
+
+    # Draw divider
+    draw.line([(PAD_X, divider_y), (CARD_W - PAD_X, divider_y)], fill=(226, 232, 240, 255), width=2)
+
+    # Draw QR code
+    qr_img = Image.open(io.BytesIO(qr_png_bytes)).convert("RGBA").resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+    card.paste(qr_img, ((CARD_W - qr_size) // 2, qr_y), mask=qr_img)
+
+    # Draw Table pill badge
+    bx0 = (CARD_W - bw) // 2
+    draw.rounded_rectangle([bx0, badge_y, bx0 + bw, badge_y + bh], radius=bh // 2, fill=(15, 23, 42, 255))
+    tb = draw.textbbox((0, 0), badge_text, font=badge_font)
+    tw, th = tb[2] - tb[0], tb[3] - tb[1]
+    draw.text(
+        (bx0 + (bw - tw) // 2, badge_y + (bh - th) // 2 - tb[1]),
+        badge_text,
+        fill=(255, 255, 255, 255),
+        font=badge_font,
+    )
+
+    # Draw section if present
+    if section and sec_y is not None:
+        sb = draw.textbbox((0, 0), section, font=sub_font)
+        sw = sb[2] - sb[0]
+        draw.text(((CARD_W - sw) // 2, sec_y), section, fill=(71, 85, 105, 255), font=sub_font)
+
+    # Draw CTA
+    cb = draw.textbbox((0, 0), cta_text, font=sub_font)
+    cw = cb[2] - cb[0]
+    draw.text(((CARD_W - cw) // 2, cta_y), cta_text, fill=(100, 116, 139, 255), font=sub_font)
+
+    buf = io.BytesIO()
+    card.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def _generate_table_qr_data(
     table: RestaurantTable,
     outlet: Optional[RestaurantOutlet] = None,
@@ -416,7 +576,14 @@ def _generate_table_qr_data(
     outlet_id_str = str(outlet.id) if outlet else str(table.outlet_id)
     qr_url = f"{domain.rstrip('/')}/#/table-order?outlet_id={outlet_id_str}&table_id={table.id}&code={table.table_code}"
 
-    png_bytes = _render_styled_table_qr(qr_url, style=style)
+    qr_png_bytes = _render_styled_table_qr(qr_url, style=style)
+    png_bytes = _render_table_qr_card(
+        qr_png_bytes=qr_png_bytes,
+        outlet_name=outlet.name if outlet else "SirfBill Restaurant",
+        table_code=table.table_code,
+        section=table.section,
+        logo_url=outlet.logo_url if outlet else None,
+    )
     b64_str = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('utf-8')}"
     return qr_url, b64_str, png_bytes
 

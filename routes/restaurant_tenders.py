@@ -10,6 +10,8 @@ from models.restaurant_order import RestaurantOrder
 from models.restaurant_table import RestaurantTable
 from models.restaurant_tender import RestaurantTender, RestaurantRefund
 from models.restaurant_audit import RestaurantAuditEvent
+from models.restaurant_kitchen import RestaurantKitchenTicket
+from utils.timezone import get_current_time
 from schemas.restaurant_tender import (
     RestaurantTenderCreate, RestaurantTenderResponse,
     RestaurantRefundCreate, RestaurantRefundResponse
@@ -64,6 +66,19 @@ def add_tender(
     order.paid_amount += amount
     if order.paid_amount >= order.grand_total:
         order.status = "COMPLETED"
+        for line in (order.lines or []):
+            if line.kot_status != "CANCELLED":
+                line.kot_status = "SERVED"
+        kitchen_tickets = db.query(RestaurantKitchenTicket).filter(
+            RestaurantKitchenTicket.order_id == order.id,
+            RestaurantKitchenTicket.status != "CANCELLED"
+        ).all()
+        for kt in kitchen_tickets:
+            kt.status = "SERVED"
+            kt.completed_at = get_current_time()
+            for itm in (kt.items or []):
+                if itm.status != "CANCELLED":
+                    itm.status = "SERVED"
         if order.table_id:
             table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
             if table:
@@ -226,6 +241,20 @@ def checkout_split_tenders(
     order.paid_amount += total_tendered
     order.status = "COMPLETED"
     order.version += 1
+
+    for line in (order.lines or []):
+        if line.kot_status != "CANCELLED":
+            line.kot_status = "SERVED"
+    kitchen_tickets = db.query(RestaurantKitchenTicket).filter(
+        RestaurantKitchenTicket.order_id == order.id,
+        RestaurantKitchenTicket.status != "CANCELLED"
+    ).all()
+    for kt in kitchen_tickets:
+        kt.status = "SERVED"
+        kt.completed_at = get_current_time()
+        for itm in (kt.items or []):
+            if itm.status != "CANCELLED":
+                itm.status = "SERVED"
 
     if order.table_id:
         table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
