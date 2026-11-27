@@ -1595,6 +1595,15 @@ def get_customer_table_info(
     resolved_order_number = active_order.order_number if active_order else (recent_order.order_number if (is_settled and recent_order) else None)
     resolved_order_status = active_order.status if active_order else (recent_order.status if (is_settled and recent_order) else None)
 
+    svc = outlet.service_settings if isinstance(outlet.service_settings, dict) else {}
+    resolved_gst = (outlet.gstin or svc.get("gst_number") or svc.get("gstin") or "").strip() or None
+    resolved_fssai = (outlet.fssai or svc.get("fssai") or svc.get("fssai_number") or "").strip() or None
+    if not resolved_gst:
+        from models.shop_settings import ShopSettings
+        shop_cfg = db.query(ShopSettings).filter(ShopSettings.tenant_id == outlet.tenant_id).first()
+        if shop_cfg and shop_cfg.gst_number:
+            resolved_gst = shop_cfg.gst_number.strip() or None
+
     return CustomerTableInfoResponse(
         table_id=table.id,
         table_code=table.table_code,
@@ -1604,8 +1613,8 @@ def get_customer_table_info(
         outlet_address=outlet.address,
         outlet_phone=outlet.phone,
         outlet_logo=outlet.logo_url,
-        outlet_gst=outlet.gstin,
-        outlet_fssai=outlet.fssai,
+        outlet_gst=resolved_gst,
+        outlet_fssai=resolved_fssai,
         currency=outlet.currency or "INR",
         tax_rate=float(outlet.tax_rate or 5.0),
         active_order_id=resolved_order_id,
