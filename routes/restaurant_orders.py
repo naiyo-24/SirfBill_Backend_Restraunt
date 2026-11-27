@@ -1660,6 +1660,33 @@ def customer_place_qr_order(
         raise HTTPException(status_code=400, detail="Cart cannot be empty. Please select at least one item.")
 
     # 4. Generate Order Number
+    # Upsert RestaurantCustomer if phone or custom name is provided
+    resolved_customer_id = None
+    clean_name = (payload.customer_name or "").strip()
+    clean_phone = (payload.customer_phone or "").strip()
+    if clean_phone:
+        from models.restaurant_customer import RestaurantCustomer
+        digits = "".join(filter(str.isdigit, clean_phone)) or clean_phone
+        cust = db.query(RestaurantCustomer).filter(
+            RestaurantCustomer.tenant_id == outlet.tenant_id,
+            RestaurantCustomer.phone.ilike(f"%{digits}%")
+        ).first()
+        if cust:
+            if clean_name and clean_name.lower() != "dine-in guest":
+                cust.name = clean_name
+            resolved_customer_id = cust.id
+        else:
+            cust = RestaurantCustomer(
+                outlet_id=outlet.id,
+                home_outlet_id=outlet.id,
+                tenant_id=outlet.tenant_id,
+                name=clean_name or "Dine-in Guest",
+                phone=clean_phone,
+            )
+            db.add(cust)
+            db.flush()
+            resolved_customer_id = cust.id
+
     # Check if this table already has an active unpaid order — if so, append new items to it
     active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY", "SERVED"]
     order = db.query(RestaurantOrder).filter(
@@ -1670,10 +1697,12 @@ def customer_place_qr_order(
 
     if order:
         order.status = "PENDING_CONFIRMATION"
-        if payload.customer_name and payload.customer_name.strip():
-            order.customer_name = payload.customer_name.strip()
-        if payload.customer_phone and payload.customer_phone.strip():
-            order.customer_phone = payload.customer_phone.strip()
+        if resolved_customer_id:
+            order.customer_id = resolved_customer_id
+        if clean_name:
+            order.customer_name = clean_name
+        if clean_phone:
+            order.customer_phone = clean_phone
         if payload.notes:
             order.notes = f"{order.notes} | {payload.notes}" if order.notes else payload.notes
         order.version = (order.version or 1) + 1
@@ -1689,8 +1718,9 @@ def customer_place_qr_order(
             order_type="DINE_IN",
             status="PENDING_CONFIRMATION",
             table_id=table.id,
-            customer_name=payload.customer_name or "Dine-in Guest",
-            customer_phone=payload.customer_phone,
+            customer_id=resolved_customer_id,
+            customer_name=clean_name or "Dine-in Guest",
+            customer_phone=clean_phone or None,
             notes=payload.notes,
             payment_method="CASH",
             idempotency_key=payload.idempotency_key,
@@ -1959,6 +1989,33 @@ def customer_place_order(
         if existing:
             return existing
 
+    # Upsert RestaurantCustomer if phone or custom name is provided
+    resolved_customer_id = None
+    clean_name = (payload.customer_name or "").strip()
+    clean_phone = (payload.customer_phone or "").strip()
+    if clean_phone:
+        from models.restaurant_customer import RestaurantCustomer
+        digits = "".join(filter(str.isdigit, clean_phone)) or clean_phone
+        cust = db.query(RestaurantCustomer).filter(
+            RestaurantCustomer.tenant_id == outlet.tenant_id,
+            RestaurantCustomer.phone.ilike(f"%{digits}%")
+        ).first()
+        if cust:
+            if clean_name and clean_name.lower() != "dine-in guest":
+                cust.name = clean_name
+            resolved_customer_id = cust.id
+        else:
+            cust = RestaurantCustomer(
+                outlet_id=outlet.id,
+                home_outlet_id=outlet.id,
+                tenant_id=outlet.tenant_id,
+                name=clean_name or "Dine-in Guest",
+                phone=clean_phone,
+            )
+            db.add(cust)
+            db.flush()
+            resolved_customer_id = cust.id
+
     # Check if this table already has an active unpaid order — if so, append new items to it
     active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY", "SERVED"]
     order = db.query(RestaurantOrder).filter(
@@ -1969,10 +2026,12 @@ def customer_place_order(
 
     if order:
         order.status = "PENDING_CONFIRMATION"
-        if payload.customer_name and payload.customer_name.strip():
-            order.customer_name = payload.customer_name.strip()
-        if payload.customer_phone and payload.customer_phone.strip():
-            order.customer_phone = payload.customer_phone.strip()
+        if resolved_customer_id:
+            order.customer_id = resolved_customer_id
+        if clean_name:
+            order.customer_name = clean_name
+        if clean_phone:
+            order.customer_phone = clean_phone
         if payload.notes:
             order.notes = f"{order.notes} | {payload.notes}" if order.notes else payload.notes
         order.version = (order.version or 1) + 1
@@ -1988,8 +2047,9 @@ def customer_place_order(
             order_type="DINE_IN",
             status="PENDING_CONFIRMATION",
             table_id=table.id,
-            customer_name=payload.customer_name or "Dine-in Guest",
-            customer_phone=payload.customer_phone,
+            customer_id=resolved_customer_id,
+            customer_name=clean_name or "Dine-in Guest",
+            customer_phone=clean_phone or None,
             notes=payload.notes,
             payment_method="CASH",
             idempotency_key=payload.idempotency_key,
