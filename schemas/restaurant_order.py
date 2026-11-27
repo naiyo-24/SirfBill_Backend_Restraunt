@@ -128,6 +128,8 @@ class CustomerTableInfoResponse(BaseModel):
     outlet_address: Optional[str] = None
     outlet_phone: Optional[str] = None
     outlet_logo: Optional[str] = None
+    outlet_gst: Optional[str] = None
+    outlet_fssai: Optional[str] = None
     currency: str = "INR"
     tax_rate: float = 5.0
     active_order_id: Optional[UUID] = None

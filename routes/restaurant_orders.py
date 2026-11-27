@@ -1604,6 +1604,8 @@ def get_customer_table_info(
         outlet_address=outlet.address,
         outlet_phone=outlet.phone,
         outlet_logo=outlet.logo_url,
+        outlet_gst=outlet.gstin,
+        outlet_fssai=outlet.fssai,
         currency=outlet.currency or "INR",
         tax_rate=float(outlet.tax_rate or 5.0),
         active_order_id=resolved_order_id,
