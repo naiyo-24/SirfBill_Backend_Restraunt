@@ -288,9 +288,6 @@ def get_orders(
         query = query.filter(RestaurantOrder.customer_id == customer_id)
     if status_filter:
         query = query.filter(RestaurantOrder.status == status_filter)
-    elif current_user and current_user.role and current_user.role.upper() == "KITCHEN":
-        # KDS terminal polling orders without status filter: only show active kitchen orders
-        query = query.filter(RestaurantOrder.status.in_(["OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY"]))
     if table_id:
         query = query.filter(RestaurantOrder.table_id == table_id)
 
