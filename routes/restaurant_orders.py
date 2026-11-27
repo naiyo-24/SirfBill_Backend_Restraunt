@@ -1659,33 +1659,52 @@ def customer_place_qr_order(
         raise HTTPException(status_code=400, detail="Cart cannot be empty. Please select at least one item.")
 
     # 4. Generate Order Number
-    order_num = _generate_order_number(db, outlet.id)
+    # Check if this table already has an active unpaid order — if so, append new items to it
+    active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY", "SERVED"]
+    order = db.query(RestaurantOrder).filter(
+        RestaurantOrder.table_id == table.id,
+        RestaurantOrder.outlet_id == outlet.id,
+        RestaurantOrder.status.in_(active_statuses),
+    ).order_by(RestaurantOrder.created_at.desc()).first()
 
-    order = RestaurantOrder(
-        outlet_id=outlet.id,
-        tenant_id=outlet.tenant_id,
-        order_number=order_num,
-        order_type="DINE_IN",
-        status="PENDING_CONFIRMATION",
-        table_id=table.id,
-        customer_name=payload.customer_name or "Dine-in Guest",
-        customer_phone=payload.customer_phone,
-        notes=payload.notes,
-        payment_method="CASH",
-        idempotency_key=payload.idempotency_key,
-        subtotal=Decimal("0.00"),
-        tax_amount=Decimal("0.00"),
-        discount_amount=Decimal("0.00"),
-        rounding_adjustment=Decimal("0.00"),
-        grand_total=Decimal("0.00"),
-        paid_amount=Decimal("0.00"),
-        version=1
-    )
-    db.add(order)
-    db.flush()
-
-    subtotal_acc = Decimal("0.00")
-    tax_acc = Decimal("0.00")
+    if order:
+        order.status = "PENDING_CONFIRMATION"
+        if payload.customer_name and payload.customer_name.strip():
+            order.customer_name = payload.customer_name.strip()
+        if payload.customer_phone and payload.customer_phone.strip():
+            order.customer_phone = payload.customer_phone.strip()
+        if payload.notes:
+            order.notes = f"{order.notes} | {payload.notes}" if order.notes else payload.notes
+        order.version = (order.version or 1) + 1
+        db.flush()
+        subtotal_acc = Decimal(str(order.subtotal or 0))
+        tax_acc = Decimal(str(order.tax_amount or 0))
+    else:
+        order_num = _generate_order_number(db, outlet.id)
+        order = RestaurantOrder(
+            outlet_id=outlet.id,
+            tenant_id=outlet.tenant_id,
+            order_number=order_num,
+            order_type="DINE_IN",
+            status="PENDING_CONFIRMATION",
+            table_id=table.id,
+            customer_name=payload.customer_name or "Dine-in Guest",
+            customer_phone=payload.customer_phone,
+            notes=payload.notes,
+            payment_method="CASH",
+            idempotency_key=payload.idempotency_key,
+            subtotal=Decimal("0.00"),
+            tax_amount=Decimal("0.00"),
+            discount_amount=Decimal("0.00"),
+            rounding_adjustment=Decimal("0.00"),
+            grand_total=Decimal("0.00"),
+            paid_amount=Decimal("0.00"),
+            version=1
+        )
+        db.add(order)
+        db.flush()
+        subtotal_acc = Decimal("0.00")
+        tax_acc = Decimal("0.00")
 
     # 5. Compute order lines with server-side pricing
     for line_in in payload.items:
@@ -1938,33 +1957,52 @@ def customer_place_order(
         if existing:
             return existing
 
-    order_num = _generate_order_number(db, outlet.id)
+    # Check if this table already has an active unpaid order — if so, append new items to it
+    active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY", "SERVED"]
+    order = db.query(RestaurantOrder).filter(
+        RestaurantOrder.table_id == table.id,
+        RestaurantOrder.outlet_id == outlet.id,
+        RestaurantOrder.status.in_(active_statuses),
+    ).order_by(RestaurantOrder.created_at.desc()).first()
 
-    order = RestaurantOrder(
-        outlet_id=outlet.id,
-        tenant_id=outlet.tenant_id,
-        order_number=order_num,
-        order_type="DINE_IN",
-        status="PENDING_CONFIRMATION",
-        table_id=table.id,
-        customer_name=payload.customer_name or "Dine-in Guest",
-        customer_phone=payload.customer_phone,
-        notes=payload.notes,
-        payment_method="CASH",
-        idempotency_key=payload.idempotency_key,
-        subtotal=Decimal("0.00"),
-        tax_amount=Decimal("0.00"),
-        discount_amount=Decimal("0.00"),
-        rounding_adjustment=Decimal("0.00"),
-        grand_total=Decimal("0.00"),
-        paid_amount=Decimal("0.00"),
-        version=1
-    )
-    db.add(order)
-    db.flush()
-
-    subtotal_acc = Decimal("0.00")
-    tax_acc = Decimal("0.00")
+    if order:
+        order.status = "PENDING_CONFIRMATION"
+        if payload.customer_name and payload.customer_name.strip():
+            order.customer_name = payload.customer_name.strip()
+        if payload.customer_phone and payload.customer_phone.strip():
+            order.customer_phone = payload.customer_phone.strip()
+        if payload.notes:
+            order.notes = f"{order.notes} | {payload.notes}" if order.notes else payload.notes
+        order.version = (order.version or 1) + 1
+        db.flush()
+        subtotal_acc = Decimal(str(order.subtotal or 0))
+        tax_acc = Decimal(str(order.tax_amount or 0))
+    else:
+        order_num = _generate_order_number(db, outlet.id)
+        order = RestaurantOrder(
+            outlet_id=outlet.id,
+            tenant_id=outlet.tenant_id,
+            order_number=order_num,
+            order_type="DINE_IN",
+            status="PENDING_CONFIRMATION",
+            table_id=table.id,
+            customer_name=payload.customer_name or "Dine-in Guest",
+            customer_phone=payload.customer_phone,
+            notes=payload.notes,
+            payment_method="CASH",
+            idempotency_key=payload.idempotency_key,
+            subtotal=Decimal("0.00"),
+            tax_amount=Decimal("0.00"),
+            discount_amount=Decimal("0.00"),
+            rounding_adjustment=Decimal("0.00"),
+            grand_total=Decimal("0.00"),
+            paid_amount=Decimal("0.00"),
+            version=1
+        )
+        db.add(order)
+        db.flush()
+        subtotal_acc = Decimal("0.00")
+        tax_acc = Decimal("0.00")
 
     for line_in in payload.items:
         resolved_item_id = line_in.item_id or line_in.menu_item_id
