@@ -1544,15 +1544,18 @@ def get_customer_table_info(
     if not outlet:
         raise HTTPException(status_code=404, detail="Restaurant outlet not found.")
 
-    active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "HOLD", "READY", "SERVED"]
-    active_order = (
-        db.query(RestaurantOrder)
-        .options(joinedload(RestaurantOrder.lines))
-        .filter(RestaurantOrder.table_id == table.id)
-        .filter(RestaurantOrder.status.in_(active_statuses))
-        .order_by(RestaurantOrder.created_at.desc())
-        .first()
-    )
+    active_order = None
+    if (table.status or "").upper() == "OCCUPIED":
+        active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "HOLD", "READY", "SERVED"]
+        active_order = (
+            db.query(RestaurantOrder)
+            .options(joinedload(RestaurantOrder.lines))
+            .filter(RestaurantOrder.table_id == table.id)
+            .filter(RestaurantOrder.status.in_(active_statuses))
+            .filter(RestaurantOrder.payment_status != "PAID")
+            .order_by(RestaurantOrder.created_at.desc())
+            .first()
+        )
 
     customer_name = None
     customer_phone = None
@@ -1586,45 +1589,9 @@ def get_customer_table_info(
             )
             for l in (active_order.lines or [])
         ]
-    else:
-        # Check if table was recently settled (completed order within last 45 minutes)
-        recent_order = (
-            db.query(RestaurantOrder)
-            .options(joinedload(RestaurantOrder.lines))
-            .filter(RestaurantOrder.table_id == table.id)
-            .filter(RestaurantOrder.status == "COMPLETED")
-            .order_by(RestaurantOrder.updated_at.desc())
-            .first()
-        )
-        if recent_order and recent_order.updated_at:
-            time_diff = (get_current_time() - recent_order.updated_at).total_seconds()
-            if time_diff <= 2700:  # 45 minutes
-                is_settled = True
-                show_thank_you = True
-                settlement_message = "Thank you for dining with us! Your order has been settled."
-                customer_name = recent_order.customer_name
-                customer_phone = recent_order.customer_phone
-                if customer_name and customer_name.strip().lower() != "dine-in guest":
-                    prefill_name = customer_name.strip()
-                prefill_phone = customer_phone
-                active_grand_total = float(recent_order.grand_total or 0.0)
-                active_items_count = sum(l.quantity for l in (recent_order.lines or []))
-                active_order_lines = [
-                    CustomerTableOrderLineSummary(
-                        id=l.id,
-                        item_name=l.item_name,
-                        variant_name=l.variant_name,
-                        quantity=l.quantity,
-                        unit_price=float(l.unit_price or 0.0),
-                        line_total=float(l.line_total or 0.0),
-                        kot_status=l.kot_status or "SERVED"
-                    )
-                    for l in (recent_order.lines or [])
-                ]
-
-    resolved_order_id = active_order.id if active_order else (recent_order.id if (is_settled and recent_order) else None)
-    resolved_order_number = active_order.order_number if active_order else (recent_order.order_number if (is_settled and recent_order) else None)
-    resolved_order_status = active_order.status if active_order else (recent_order.status if (is_settled and recent_order) else None)
+    resolved_order_id = active_order.id if active_order else None
+    resolved_order_number = active_order.order_number if active_order else None
+    resolved_order_status = active_order.status if active_order else None
 
     svc = outlet.service_settings if isinstance(outlet.service_settings, dict) else {}
     resolved_gst = (outlet.gstin or svc.get("gst_number") or svc.get("gstin") or "").strip() or None
@@ -1823,13 +1790,16 @@ def customer_place_order(
             db.flush()
             resolved_customer_id = cust.id
 
-    # Check if this table already has an active unpaid order — if so, append new items to it
-    active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY", "SERVED"]
-    order = db.query(RestaurantOrder).filter(
-        RestaurantOrder.table_id == table.id,
-        RestaurantOrder.outlet_id == outlet.id,
-        RestaurantOrder.status.in_(active_statuses),
-    ).order_by(RestaurantOrder.created_at.desc()).first()
+    # Check if this table is OCCUPIED and already has an active unpaid order — if so, append new items to it
+    order = None
+    if (table.status or "").upper() == "OCCUPIED":
+        active_statuses = ["PENDING_CONFIRMATION", "OPEN", "IN_KITCHEN", "SENT_TO_KITCHEN", "READY", "SERVED"]
+        order = db.query(RestaurantOrder).filter(
+            RestaurantOrder.table_id == table.id,
+            RestaurantOrder.outlet_id == outlet.id,
+            RestaurantOrder.status.in_(active_statuses),
+            RestaurantOrder.payment_status != "PAID",
+        ).order_by(RestaurantOrder.created_at.desc()).first()
 
     if order:
         order.status = "PENDING_CONFIRMATION"
