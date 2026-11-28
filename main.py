@@ -578,6 +578,7 @@ from routes.restaurant_crm import router as restaurant_crm_router
 from routes.restaurant_procurement import router as restaurant_procurement_router
 from routes.restaurant_subscriptions import router as restaurant_subscriptions_router
 from routes.hardware_products import router as hardware_router
+from routes.service_plans import router as service_plans_router
 
 app.include_router(restaurant_outlets_router)
 app.include_router(restaurant_menu_router)
@@ -594,6 +595,7 @@ app.include_router(restaurant_crm_router)
 app.include_router(restaurant_procurement_router)
 app.include_router(restaurant_subscriptions_router)
 app.include_router(hardware_router)
+app.include_router(service_plans_router)
 
 @app.get("/")
 def read_root():

@@ -103,6 +103,29 @@ def upgrade() -> None:
         )
         op.create_index(op.f('ix_subscription_plans_plan_code'), 'subscription_plans', ['plan_code'], unique=True)
 
+    # --- Table: service_plans ---
+    if 'service_plans' not in existing_tables:
+        op.create_table('service_plans',
+        sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+        sa.Column('category', sa.String(length=50), nullable=False),
+        sa.Column('plan_code', sa.String(length=50), nullable=False),
+        sa.Column('badge', sa.String(length=50), nullable=True),
+        sa.Column('name', sa.String(length=120), nullable=False),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('price', sa.Numeric(precision=10, scale=2), nullable=False),
+        sa.Column('gst_applicable', sa.Boolean(), nullable=False),
+        sa.Column('gst_rate', sa.Numeric(precision=5, scale=2), nullable=False),
+        sa.Column('currency', sa.String(length=10), nullable=False),
+        sa.Column('features', sa.JSON(), nullable=False),
+        sa.Column('sort_order', sa.Integer(), nullable=False),
+        sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_service_plans_category'), 'service_plans', ['category'], unique=False)
+        op.create_index(op.f('ix_service_plans_plan_code'), 'service_plans', ['plan_code'], unique=True)
+
     # --- Table: users ---
     if 'users' not in existing_tables:
         op.create_table('users',
@@ -1305,6 +1328,8 @@ def downgrade() -> None:
         op.drop_table('users')
     if 'subscription_plans' in existing_tables:
         op.drop_table('subscription_plans')
+    if 'service_plans' in existing_tables:
+        op.drop_table('service_plans')
     if 'shops' in existing_tables:
         op.drop_table('shops')
     if 'hardware_products' in existing_tables:

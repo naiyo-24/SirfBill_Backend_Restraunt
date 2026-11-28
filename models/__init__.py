@@ -36,6 +36,7 @@ from .restaurant_stock_audit import RestaurantStockAudit, RestaurantStockAuditIt
 from .restaurant_customer import RestaurantCustomer, RestaurantLoyaltyRules, RestaurantCustomerLedger
 from .restaurant_subscription import SubscriptionPlan, TenantSubscription, SubscriptionPayment
 from .hardware_product import HardwareProduct, HardwareOrder
+from .service_plan import ServicePlan
 
 
 
