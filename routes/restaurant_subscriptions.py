@@ -980,7 +980,8 @@ def verify_razorpay_payment(
             is_valid = hmac.compare_digest(expected_sig, payload.razorpay_signature)
         except Exception:
             is_valid = False
-    elif not is_valid:
+    elif not is_valid and payload.razorpay_order_id and payload.razorpay_order_id.startswith("order_test_") and not key_secret:
+        # Only allow test-mode bypass when no live Razorpay key_secret is configured
         is_valid = bool(payload.razorpay_payment_id)
 
     if not is_valid:
