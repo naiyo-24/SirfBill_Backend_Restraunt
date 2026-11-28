@@ -275,27 +275,71 @@ def place_hardware_order(
     current_user: User = Depends(get_restaurant_staff)
 ):
     """
-    Place a hardware purchase order / request a demo inquiry directly from the restaurant dashboard.
+    Place a hardware purchase order, service plan order, or combined hardware + service plan order
+    (from dashboard or WhatsApp) directly from the restaurant dashboard.
     """
-    product = db.query(HardwareProduct).filter(HardwareProduct.id == payload.product_id).first()
-    if not product or not product.is_active:
-        raise HTTPException(status_code=404, detail="Hardware product not available")
+    if not payload.product_id and not payload.plan_id and not payload.plan_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Please select at least a hardware product or a service plan."
+        )
+
+    product = None
+    hw_unit_price = Decimal("0.00")
+    hw_total = Decimal("0.00")
+    resolved_plan_id = payload.plan_id
+    resolved_plan_name = payload.plan_name
+
+    if payload.product_id:
+        parsed_product_uuid = None
+        try:
+            parsed_product_uuid = UUID(str(payload.product_id))
+        except (ValueError, TypeError):
+            pass
+
+        if parsed_product_uuid:
+            product = db.query(HardwareProduct).filter(HardwareProduct.id == parsed_product_uuid).first()
+            if not product or not product.is_active:
+                raise HTTPException(status_code=404, detail="Hardware product not available")
+            hw_unit_price = product.price
+            hw_total = product.price * payload.quantity
+        else:
+            # Frontend sent a plan code (e.g. "PLAN-1-INFLUENCER") in product_id
+            if not resolved_plan_id:
+                resolved_plan_id = str(payload.product_id)
+            if not resolved_plan_name:
+                resolved_plan_name = str(payload.product_id)
+
+    plan_price_dec = Decimal(str(payload.plan_price or 0)).quantize(Decimal("0.01"))
+    total_amount = (hw_total + plan_price_dec).quantize(Decimal("0.01"))
+
+    resolved_order_type = payload.order_type
+    if not resolved_order_type:
+        if product and (resolved_plan_id or resolved_plan_name):
+            resolved_order_type = "COMBINED"
+        elif resolved_plan_id or resolved_plan_name:
+            resolved_order_type = "SERVICE_PLAN"
+        else:
+            resolved_order_type = "HARDWARE"
 
     # Generate sequential order code
     date_str = datetime.utcnow().strftime("%Y%m")
     count_today = db.query(HardwareOrder).count() + 1
     order_code = f"HWO-{date_str}-{count_today:04d}"
 
-    total_amount = (product.price * payload.quantity).quantize(Decimal("0.01"))
-
     order = HardwareOrder(
         tenant_id=current_user.tenant_id,
         outlet_id=payload.outlet_id or current_user.outlet_id,
-        product_id=product.id,
+        product_id=product.id if product else None,
         order_number=order_code,
         quantity=payload.quantity,
-        unit_price=product.price,
+        unit_price=hw_unit_price,
         total_price=total_amount,
+        plan_id=resolved_plan_id,
+        plan_name=resolved_plan_name,
+        plan_price=plan_price_dec,
+        order_type=resolved_order_type.upper(),
+        order_source=(payload.order_source or "DASHBOARD").upper(),
         contact_name=payload.contact_name,
         contact_phone=payload.contact_phone,
         contact_email=payload.contact_email,

@@ -469,6 +469,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SirfBill Restaurant Backend", lifespan=lifespan)
 
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    print(f"⚠️ [422 VALIDATION ERROR] {request.method} {request.url.path} | Errors: {exc.errors()}", flush=True)
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5194", "http://192.168.0.222:5194", "https://sirfapi.vwings247.me", "*"],

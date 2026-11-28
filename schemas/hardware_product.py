@@ -2,7 +2,7 @@ from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ----------------- Hardware Catalog Schemas -----------------
 class HardwareProductBase(BaseModel):
@@ -71,9 +71,14 @@ class HardwareCategorySummary(BaseModel):
 
 # ----------------- Hardware Purchase & Inquiry Schemas -----------------
 class HardwareOrderCreate(BaseModel):
-    product_id: UUID
+    product_id: Optional[str] = None
     outlet_id: Optional[UUID] = None
     quantity: int = Field(1, ge=1)
+    plan_id: Optional[str] = None
+    plan_name: Optional[str] = None
+    plan_price: Optional[Decimal] = Decimal("0.00")
+    order_type: Optional[str] = None # HARDWARE, SERVICE_PLAN, COMBINED
+    order_source: str = "DASHBOARD" # DASHBOARD, WHATSAPP
     contact_name: str = Field(..., max_length=150)
     contact_phone: str = Field(..., max_length=30)
     contact_email: Optional[str] = None
@@ -83,6 +88,20 @@ class HardwareOrderCreate(BaseModel):
     pincode: Optional[str] = None
     payment_method: str = "UPI" # UPI, RAZORPAY, COD, BANK_TRANSFER
     notes: Optional[str] = None
+
+    @field_validator("product_id", "outlet_id", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v):
+        if v == "":
+            return None
+        return v
+
+    @field_validator("plan_price", mode="before")
+    @classmethod
+    def _empty_price_to_zero(cls, v):
+        if v == "" or v is None:
+            return Decimal("0.00")
+        return v
 
 class HardwareOrderUpdate(BaseModel):
     status: Optional[str] = None # NEW, CONFIRMED, INVOICED, SHIPPED, DELIVERED, CANCELLED
@@ -96,10 +115,15 @@ class HardwareOrderResponse(BaseModel):
     order_number: str
     tenant_id: UUID
     outlet_id: Optional[UUID] = None
-    product_id: UUID
+    product_id: Optional[UUID] = None
     quantity: int
     unit_price: Decimal
     total_price: Decimal
+    plan_id: Optional[str] = None
+    plan_name: Optional[str] = None
+    plan_price: Optional[Decimal] = Decimal("0.00")
+    order_type: Optional[str] = "HARDWARE"
+    order_source: Optional[str] = "DASHBOARD"
     contact_name: str
     contact_phone: str
     contact_email: Optional[str] = None

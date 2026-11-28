@@ -65,12 +65,19 @@ class HardwareOrder(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid())
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     outlet_id = Column(UUID(as_uuid=True), ForeignKey("restaurant_outlets.id", ondelete="SET NULL"), nullable=True, index=True)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("hardware_products.id", ondelete="RESTRICT"), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("hardware_products.id", ondelete="RESTRICT"), nullable=True, index=True)
 
     order_number = Column(String(50), unique=True, nullable=False, index=True) # e.g. "HWO-202611-0001"
     quantity = Column(Integer, default=1, nullable=False)
-    unit_price = Column(Numeric(10, 2), nullable=False)
+    unit_price = Column(Numeric(10, 2), default=0.00, nullable=False)
     total_price = Column(Numeric(10, 2), nullable=False)
+
+    # Optional Service Plan & Order Source (for combined hardware + subscription / WhatsApp orders)
+    plan_id = Column(String(100), nullable=True)
+    plan_name = Column(String(150), nullable=True)
+    plan_price = Column(Numeric(10, 2), default=0.00, nullable=False)
+    order_type = Column(String(30), default="HARDWARE", nullable=False) # HARDWARE, SERVICE_PLAN, COMBINED
+    order_source = Column(String(30), default="DASHBOARD", nullable=False) # DASHBOARD, WHATSAPP
 
     # Delivery & Contact Information
     contact_name = Column(String(150), nullable=False)
