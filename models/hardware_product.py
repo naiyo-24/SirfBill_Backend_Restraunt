@@ -32,6 +32,7 @@ class HardwareProduct(Base):
 
     # Pricing & Taxes
     price = Column(Numeric(10, 2), nullable=False) # Current selling price in INR
+    offer_price = Column(Numeric(10, 2), nullable=True) # Optional promotional offer price in INR
     mrp = Column(Numeric(10, 2), nullable=True)     # Strike-through MRP in INR
     discount_pct = Column(Numeric(5, 2), default=0.00, nullable=False)
     tax_rate = Column(Numeric(5, 2), default=18.00, nullable=False) # 18% GST standard for IT hardware

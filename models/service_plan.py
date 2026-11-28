@@ -21,6 +21,7 @@ class ServicePlan(Base):
     name = Column(String(120), nullable=False)
     description = Column(Text, nullable=True)
     price = Column(Numeric(10, 2), nullable=False)
+    offer_price = Column(Numeric(10, 2), nullable=True)
     gst_applicable = Column(Boolean, default=False, nullable=False)
     gst_rate = Column(Numeric(5, 2), default=18.00, nullable=False)
     currency = Column(String(10), default="INR", nullable=False)

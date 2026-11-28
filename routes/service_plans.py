@@ -21,6 +21,7 @@ class ServicePlanResponse(BaseModel):
     name: str
     description: Optional[str] = None
     price: float
+    offer_price: Optional[float] = None
     gst_applicable: bool
     gst_rate: float
     currency: str

@@ -16,6 +16,7 @@ class HardwareProductBase(BaseModel):
     specifications: Optional[Dict[str, Any]] = Field(default_factory=dict)
     features: Optional[List[str]] = Field(default_factory=list)
     price: Decimal = Field(..., gt=0, description="Selling price in INR")
+    offer_price: Optional[Decimal] = Field(None, description="Optional promotional offer price in INR")
     mrp: Optional[Decimal] = Field(None, description="Original list price / MRP")
     discount_pct: Decimal = Field(Decimal("0.00"), ge=0, le=100)
     tax_rate: Decimal = Field(Decimal("18.00"), description="GST rate percentage")
@@ -42,6 +43,7 @@ class HardwareProductUpdate(BaseModel):
     specifications: Optional[Dict[str, Any]] = None
     features: Optional[List[str]] = None
     price: Optional[Decimal] = None
+    offer_price: Optional[Decimal] = None
     mrp: Optional[Decimal] = None
     discount_pct: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None

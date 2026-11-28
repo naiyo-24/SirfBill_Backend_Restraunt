@@ -44,6 +44,7 @@ def upgrade() -> None:
         sa.Column('specifications', sa.JSON(), nullable=False),
         sa.Column('features', sa.JSON(), nullable=False),
         sa.Column('price', sa.Numeric(precision=10, scale=2), nullable=False),
+        sa.Column('offer_price', sa.Numeric(precision=10, scale=2), nullable=True),
         sa.Column('mrp', sa.Numeric(precision=10, scale=2), nullable=True),
         sa.Column('discount_pct', sa.Numeric(precision=5, scale=2), nullable=False),
         sa.Column('tax_rate', sa.Numeric(precision=5, scale=2), nullable=False),
@@ -113,6 +114,7 @@ def upgrade() -> None:
         sa.Column('name', sa.String(length=120), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('price', sa.Numeric(precision=10, scale=2), nullable=False),
+        sa.Column('offer_price', sa.Numeric(precision=10, scale=2), nullable=True),
         sa.Column('gst_applicable', sa.Boolean(), nullable=False),
         sa.Column('gst_rate', sa.Numeric(precision=5, scale=2), nullable=False),
         sa.Column('currency', sa.String(length=10), nullable=False),
@@ -1224,6 +1226,10 @@ def upgrade() -> None:
 
         # shops
         "ALTER TABLE shops ADD COLUMN IF NOT EXISTS account_holder_name VARCHAR;",
+
+        # hardware_products & service_plans offer_price
+        "ALTER TABLE hardware_products ADD COLUMN IF NOT EXISTS offer_price NUMERIC(10, 2);",
+        "ALTER TABLE service_plans ADD COLUMN IF NOT EXISTS offer_price NUMERIC(10, 2);",
 
         # High-performance Trigram GIN indexes
         "CREATE INDEX IF NOT EXISTS idx_menu_items_name_trgm ON restaurant_menu_items USING gin (name gin_trgm_ops);",
